@@ -454,6 +454,7 @@ where
                     block_verifier,
                     commit_vote_monitor.clone(),
                     transaction_certifier.clone(),
+                    synchronizer.clone(),
                 ));
                 network_manager
                     .start_observer_server(observer_service)
@@ -472,6 +473,7 @@ where
                 block_verifier,
                 commit_vote_monitor.clone(),
                 transaction_certifier.clone(),
+                synchronizer.clone(),
             ));
 
             let observer_subscriber = ObserverSubscriber::new(
