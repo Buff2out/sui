@@ -18,6 +18,7 @@ use crate::{
     BlockAPI as _, CommitConsumerArgs,
     authority_service::AuthorityService,
     block_manager::BlockManager,
+    block_sync_service::BlockSyncService,
     block_verifier::SignedBlockVerifier,
     commit_observer::CommitObserver,
     commit_syncer::{CommitSyncer, CommitSyncerHandle},
@@ -405,6 +406,13 @@ where
         )
         .start();
 
+        // Create BlockSyncService that will be shared by both AuthorityService and ObserverService
+        let block_sync_service = Arc::new(BlockSyncService::new(
+            context.clone(),
+            dag_state.clone(),
+            store.clone(),
+        ));
+
         let (subscriber, round_prober_handle) = if context.is_validator() {
             let authority_service = Arc::new(AuthorityService::new(
                 context.clone(),
@@ -416,7 +424,7 @@ where
                 signals_receivers.block_broadcast_receiver(),
                 transaction_certifier.clone(),
                 dag_state.clone(),
-                store.clone(),
+                block_sync_service.clone(),
             ));
 
             // Start the validator server if this is a validator node.
@@ -460,6 +468,7 @@ where
                     commit_vote_monitor.clone(),
                     transaction_certifier.clone(),
                     synchronizer.clone(),
+                    block_sync_service.clone(),
                 ));
                 network_manager
                     .start_observer_server(observer_service)
@@ -479,6 +488,7 @@ where
                 commit_vote_monitor.clone(),
                 transaction_certifier.clone(),
                 synchronizer.clone(),
+                block_sync_service.clone(),
             ));
 
             let observer_subscriber = ObserverSubscriber::new(
