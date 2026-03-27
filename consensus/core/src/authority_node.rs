@@ -403,6 +403,7 @@ where
             round_tracker.clone(),
             commit_syncer_client.clone(),
             dag_state.clone(),
+            peers_pool.clone(),
         )
         .start();
 
