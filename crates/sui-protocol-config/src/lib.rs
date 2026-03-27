@@ -316,6 +316,7 @@ const TESTNET_USDC: &str =
 // Version 119: Enable the new VM.
 // Version 120: Disallow unused jump tables
 // Version 121: Re-enable defer_unpaid_amplification (devnet + testnet).
+//              Enable bulletproofs verification on devnet.
 
 #[derive(Copy, Clone, Debug, Hash, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ProtocolVersion(u64);
@@ -4789,13 +4790,6 @@ impl ProtocolConfig {
                     }
                     cfg.transfer_receive_object_cost_per_byte = Some(1);
                     cfg.transfer_receive_object_type_cost_per_byte = Some(2);
-
-                    // Enable bulletproofs range proofs on devnet
-                    cfg.verify_bulletproofs_ristretto255_base_cost = Some(30000);
-                    cfg.verify_bulletproofs_ristretto255_cost_per_bit_and_commitment = Some(6500);
-                    if chain != Chain::Mainnet && chain != Chain::Testnet {
-                        cfg.feature_flags.enable_verify_bulletproofs_ristretto255 = true;
-                    }
                 }
                 120 => {
                     cfg.feature_flags.disallow_jump_orphans = true;
@@ -4805,6 +4799,13 @@ impl ProtocolConfig {
                     if chain != Chain::Mainnet {
                         cfg.feature_flags.defer_unpaid_amplification = true;
                         cfg.gasless_max_tps = Some(50);
+                    }
+
+                    // Enable bulletproofs range proofs on devnet
+                    cfg.verify_bulletproofs_ristretto255_base_cost = Some(30000);
+                    cfg.verify_bulletproofs_ristretto255_cost_per_bit_and_commitment = Some(6500);
+                    if chain != Chain::Mainnet && chain != Chain::Testnet {
+                        cfg.feature_flags.enable_verify_bulletproofs_ristretto255 = true;
                     }
                 }
                 // Use this template when making changes:
