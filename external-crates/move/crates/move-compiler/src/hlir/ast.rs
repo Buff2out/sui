@@ -7,7 +7,9 @@ use crate::{
     expansion::ast::{
         AbilitySet, Attributes, Friend, ModuleIdent, Mutability, ability_modifiers_ast_debug,
     },
-    naming::ast::{BuiltinTypeName, BuiltinTypeName_, DatatypeTypeParameter, TParam},
+    naming::ast::{
+        BuiltinTypeName, BuiltinTypeName_, Color, DatatypeTypeParameter, TParam,
+    },
     parser::ast::{
         self as P, BinOp, ConstantName, DatatypeName, ENTRY_MODIFIER, Field, FunctionName,
         TargetKind, UnaryOp, VariantName,
@@ -237,7 +239,18 @@ pub enum Statement_ {
         block: Block,
     },
 }
-pub type Statement = Spanned<Statement_>;
+#[derive(Debug, Clone, PartialEq)]
+pub struct Statement {
+    pub loc: Loc,
+    pub color: Color,
+    pub value: Statement_,
+}
+
+impl Statement {
+    pub fn new(loc: Loc, color: Color, value: Statement_) -> Self {
+        Self { loc, color, value }
+    }
+}
 
 pub type Block = VecDeque<Statement>;
 
@@ -284,7 +297,19 @@ pub enum Command_ {
         arms: Vec<(VariantName, Label)>,
     },
 }
-pub type Command = Spanned<Command_>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Command {
+    pub loc: Loc,
+    pub color: Color,
+    pub value: Command_,
+}
+
+impl Command {
+    pub fn new(loc: Loc, color: Color, value: Command_) -> Self {
+        Self { loc, color, value }
+    }
+}
 
 // TODO: replace this with the `move_ir_types` one when possible.
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -429,9 +454,14 @@ pub type UnannotatedExp = Spanned<UnannotatedExp_>;
 pub struct Exp {
     pub ty: Type,
     pub exp: UnannotatedExp,
+    pub color: Option<Color>,
 }
 pub fn exp(ty: Type, exp: UnannotatedExp) -> Exp {
-    Exp { ty, exp }
+    Exp {
+        ty,
+        exp,
+        color: None,
+    }
 }
 
 //**************************************************************************************************
@@ -1311,6 +1341,12 @@ impl AstDebug for (Block, Box<Exp>) {
     }
 }
 
+impl AstDebug for Statement {
+    fn ast_debug(&self, w: &mut AstWriter) {
+        self.value.ast_debug(w)
+    }
+}
+
 impl AstDebug for Statement_ {
     fn ast_debug(&self, w: &mut AstWriter) {
         use Statement_ as S;
@@ -1373,6 +1409,12 @@ impl AstDebug for Statement_ {
                 w.block(|w| block.ast_debug(w))
             }
         }
+    }
+}
+
+impl AstDebug for Command {
+    fn ast_debug(&self, w: &mut AstWriter) {
+        self.value.ast_debug(w)
     }
 }
 
@@ -1477,7 +1519,10 @@ impl AstDebug for Value_ {
 
 impl AstDebug for Exp {
     fn ast_debug(&self, w: &mut AstWriter) {
-        let Exp { ty, exp } = self;
+        let Exp { ty, exp, color } = self;
+        if let Some(c) = color {
+            w.write(&format!("(color={c}) "));
+        }
         w.annotate(|w| exp.ast_debug(w), ty)
     }
 }

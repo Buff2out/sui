@@ -35,6 +35,7 @@ const UNUSED_EXT: &str = "unused";
 const MIGRATION_EXT: &str = "migration";
 const IDE_EXT: &str = "ide";
 const NO_STDLIB_EXT: &str = "no_std";
+const MACRO_FRAMES_EXT: &str = "macro_frames";
 const MODE_EXT: &str = "mode";
 
 const LINTER_DIR: &str = "linter";
@@ -63,6 +64,8 @@ enum TestKind {
     IDE,
     // Tests with std library disabled
     NoStd,
+    // Tests macro frame info for debugger support
+    MacroFrames,
     // Tests with a mode enabled
     Mode(Vec<Symbol>),
 }
@@ -76,6 +79,7 @@ impl TestKind {
             _ if path_extension == MIGRATION_EXT => TestKind::Migration,
             _ if path_extension == IDE_EXT => TestKind::IDE,
             _ if path_extension == NO_STDLIB_EXT => TestKind::NoStd,
+            _ if path_extension == MACRO_FRAMES_EXT => TestKind::MacroFrames,
             _ if path_extension.to_string_lossy().starts_with(MODE_EXT) => {
                 let pe_str = path_extension.to_string_lossy();
                 let mode_str = pe_str.strip_prefix(MODE_EXT).unwrap();
@@ -97,6 +101,7 @@ impl TestKind {
             TestKind::Migration => Some(MIGRATION_EXT.to_string()),
             TestKind::IDE => Some(IDE_EXT.to_string()),
             TestKind::NoStd => Some(NO_STDLIB_EXT.to_string()),
+            TestKind::MacroFrames => Some(MACRO_FRAMES_EXT.to_string()),
             TestKind::Mode(modes) => Some(format!(
                 "{MODE_EXT}{}",
                 modes
@@ -166,8 +171,11 @@ fn test_config(path: &Path) -> (TestKind, TestInfo, PackageConfig, Flags) {
         is_dependency: false,
         warning_filter: WarningFiltersBuilder::new_for_source(),
     };
-    // Unused and IDE do not have additional warning filters
-    if !matches!(test_kind, TestKind::Unused | TestKind::IDE) {
+    // Unused, IDE, and MacroFrames do not have additional warning filters
+    if !matches!(
+        test_kind,
+        TestKind::Unused | TestKind::IDE | TestKind::MacroFrames
+    ) {
         config
             .warning_filter
             .union(&WarningFiltersBuilder::unused_warnings_filter_for_test());
@@ -186,6 +194,8 @@ fn test_config(path: &Path) -> (TestKind, TestInfo, PackageConfig, Flags) {
         TestKind::Test | TestKind::Unused | TestKind::Migration => Flags::testing(),
         // additional flags for IDE
         TestKind::IDE => Flags::testing().set_ide_test_mode(true).set_ide_mode(true),
+        // MacroFrames tests use a special mode to emit only macro frame diagnostics
+        TestKind::MacroFrames => Flags::empty().set_modes(vec!["macro-frames".into()]),
         // Setting a mode flag
         TestKind::Mode(modes) => Flags::empty().set_modes(modes.clone()),
     };
@@ -309,6 +319,9 @@ datatest_stable::harness!(
     run_test,
     "tests/",
     r".*\.no_std$",
+    run_test,
+    "tests/",
+    r".*\.macro_frames$",
     run_test,
     "tests/",
     r".*\.mode-.*$",
