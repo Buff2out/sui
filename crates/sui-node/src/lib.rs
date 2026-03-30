@@ -75,6 +75,7 @@ macro_rules! jwk_log {
     };
 }
 
+use consensus_config::ProtocolKeyPair;
 use fastcrypto_zkp::bn254::zk_login::JWK;
 pub use handle::SuiNodeHandle;
 use mysten_metrics::{RegistryService, spawn_monitored_task};
@@ -100,7 +101,6 @@ use sui_core::consensus_adapter::{
     CheckConnection, ConnectionMonitorStatus, ConsensusAdapter, ConsensusAdapterMetrics,
 };
 use sui_core::consensus_manager::ConsensusManager;
-use consensus_config::ProtocolKeyPair;
 use sui_core::consensus_throughput_calculator::{
     ConsensusThroughputCalculator, ConsensusThroughputProfiler, ThroughputProfileRanges,
 };
