@@ -695,9 +695,7 @@ impl SourceMap {
         Ok(())
     }
 
-    pub fn function_map_iter(
-        &self,
-    ) -> impl Iterator<Item = (TableIndex, &FunctionSourceMap)> {
+    pub fn function_map_iter(&self) -> impl Iterator<Item = (TableIndex, &FunctionSourceMap)> {
         self.function_map.iter().map(|(k, v)| (*k, v))
     }
 
