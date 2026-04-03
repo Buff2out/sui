@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
-use http::Request;
 use prometheus::Histogram;
 use prometheus::HistogramVec;
 use prometheus::IntCounter;
@@ -306,7 +305,7 @@ impl<S> Layer<S> for MetricsLayer {
 
 impl<S, ReqBody, ResBody> Service<http::Request<ReqBody>> for MetricsService<S>
 where
-    S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>> + Clone + Send + 'static,
+    S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>> + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Send + 'static,
     ReqBody: Send + 'static,

@@ -1,8 +1,7 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::Arc;
-
+use prometheus::Registry;
 use sui_rpc::Client;
 use tonic::body::Body;
 use tower::util::BoxService;
@@ -67,5 +66,9 @@ impl SuiRpcClient {
         BoxedChannel,
     > {
         self.client.subscription_client()
+    }
+
+    pub fn client(&self) -> Client {
+        self.client.clone()
     }
 }
