@@ -15659,6 +15659,7 @@ dependencies = [
  "diesel",
  "diesel-async",
  "futures",
+ "http 1.3.1",
  "move-core-types",
  "mysten-common",
  "prometheus",
@@ -15679,6 +15680,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tonic 0.14.3",
+ "tower 0.5.3",
  "tracing",
  "url",
 ]

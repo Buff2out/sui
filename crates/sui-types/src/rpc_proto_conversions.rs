@@ -12,6 +12,7 @@ fn ms_to_timestamp(ms: u64) -> prost_types::Timestamp {
     }
 }
 use crate::message_envelope::Message as _;
+use accumulator_write::AccumulatorValue;
 use fastcrypto::traits::ToFromBytes;
 use sui_rpc::field::FieldMaskTree;
 use sui_rpc::merge::Merge;
