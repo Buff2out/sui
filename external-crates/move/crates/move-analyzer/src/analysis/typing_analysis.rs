@@ -1151,8 +1151,8 @@ impl TypingVisitorContext for TypingAnalysisContext<'_> {
                 | TE::IfElse(_, _, _)
                 | TE::While(_, _, _)
                 | TE::Loop { .. }
-                | TE::NamedBlock(_, _)
-                | TE::Block(_)
+                | TE::NamedBlock(_, _, _)
+                | TE::Block(_, _)
                 | TE::Assign(_, _, _)
                 | TE::Mutate(_, _)
                 | TE::Return(_)
@@ -1262,7 +1262,6 @@ impl TypingVisitorContext for TypingAnalysisContext<'_> {
     fn visit_use_funs(&mut self, use_funs: &N::UseFuns) {
         let N::UseFuns {
             color: _,
-            expansion_color: _,
             resolved,
             implicit_candidates,
         } = use_funs;
