@@ -18,6 +18,7 @@ pub mod objects;
 pub mod package_resolver;
 pub mod packages;
 pub mod pg_reader;
+pub mod sui_rpc_client;
 pub mod system_package_task;
 pub mod transactions;
 pub mod tx_balance_changes;
