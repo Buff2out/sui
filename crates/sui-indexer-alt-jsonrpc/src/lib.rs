@@ -16,7 +16,9 @@ use sui_indexer_alt_reader::bigtable_reader::BigtableArgs;
 use sui_indexer_alt_reader::consistent_reader::ConsistentReaderArgs;
 use sui_indexer_alt_reader::pg_reader::db::DbArgs;
 use sui_indexer_alt_reader::system_package_task::SystemPackageTask;
+use sui_indexer_alt_reader::sui_rpc_client::SuiRpcClient;
 use sui_indexer_alt_reader::system_package_task::SystemPackageTaskArgs;
+use async_graphql::dataloader::DataLoader;
 use sui_open_rpc::Project;
 use tower_http::catch_panic;
 use tower_layer::Identity;
@@ -301,9 +303,15 @@ pub async fn start_rpc(
     rpc.add_module(Transactions(context.clone()))?;
 
     if let Some(fullnode_rpc_url) = node_args.fullnode_rpc_url {
-        let client = context.config().node.client(fullnode_rpc_url)?;
+        let client = context.config().node.client(fullnode_rpc_url.clone())?;
         rpc.add_module(DelegationGovernance::new(client.clone()))?;
         rpc.add_module(Write::new(client))?;
+
+        let sui_rpc_client =
+            SuiRpcClient::new(fullnode_rpc_url.as_str(), Some("fullnode_grpc"), registry)
+                .map_err(|e| anyhow::anyhow!(e))?;
+        let rpc_loader = Arc::new(DataLoader::new(sui_rpc_client, tokio::spawn));
+        // TODO: wire rpc_loader into new Governance module
     } else {
         warn!(
             "No fullnode rpc url provided, DelegationGovernance and Write modules will not be added."
