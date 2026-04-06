@@ -19,6 +19,7 @@ use sui_indexer_alt_reader::sui_rpc_client::SuiRpcClient;
 use sui_indexer_alt_schema::schema::kv_epoch_starts;
 use sui_json_rpc_api::GovernanceReadApiClient;
 use sui_json_rpc_types::DelegatedStake;
+use sui_json_rpc_types::Page;
 use sui_json_rpc_types::Stake;
 use sui_json_rpc_types::StakeStatus;
 use sui_json_rpc_types::ValidatorApys;
@@ -60,10 +61,6 @@ trait GovernanceApi {
     /// Return a summary of the latest version of the Sui System State object (0x5), on-chain.
     #[method(name = "getLatestSuiSystemState")]
     async fn get_latest_sui_system_state(&self) -> RpcResult<SuiSystemStateSummary>;
-
-    /// Return all [DelegatedStake].
-    #[method(name = "getStakes")]
-    async fn get_stakes(&self, owner: SuiAddress) -> RpcResult<Vec<DelegatedStake>>;
 }
 
 #[open_rpc(namespace = "suix", tag = "Delegation Governance API")]
@@ -91,6 +88,18 @@ trait GrpcDelegationGovernanceApi {
     /// Return all [DelegatedStake].
     #[method(name = "getStakes")]
     async fn get_stakes(&self, owner: SuiAddress) -> RpcResult<Vec<DelegatedStake>>;
+}
+
+#[derive(thiserror::Error, Debug)]
+enum Error {
+    #[error("Failed to load StakedSui objects: {0}")]
+    LoadStakedSui(String),
+
+    #[error("Failed to load rewards: {0}")]
+    LoadRewards(String),
+
+    #[error("Failed to load validator addresses: {0}")]
+    LoadValidatorAddresses(String),
 }
 
 pub(crate) struct Governance(pub Context);
@@ -166,28 +175,31 @@ impl GrpcDelegationGovernanceApiServer for GrpcDelegationGovernance {
             .map(|id| load_live_deserialized::<StakedSui>(&self.ctx, *id));
         let staked_suis: Vec<StakedSui> = future::try_join_all(staked_sui_futures)
             .await
-            .context("Failed to load StakedSui objects")?;
+            .map_err(|e| Error::LoadStakedSui(e.to_string()))
+            .map_err(|e| RpcError::<Error>::InternalError(anyhow::anyhow!(e)))?;
 
         // Batch-load rewards and validator addresses via the DataLoader.
         let reward_keys: Vec<RewardsKey> = staked_suis
             .iter()
-            .map(|s| RewardsKey(s.id().into()))
+            .map(|s: &StakedSui| RewardsKey(s.id().into()))
             .collect();
         let validator_keys: Vec<ValidatorAddressKey> = staked_suis
             .iter()
-            .map(|s| ValidatorAddressKey(s.pool_id().into()))
+            .map(|s: &StakedSui| ValidatorAddressKey(s.pool_id().into()))
             .collect();
 
         let rewards = self
             .rpc_loader
             .load_many(reward_keys.clone())
             .await
-            .map_err(|e| RpcError::Internal(anyhow::anyhow!("{e}")))?;
+            .map_err(|e| Error::LoadRewards(e.to_string()))
+            .map_err(|e| RpcError::<Error>::InternalError(anyhow::anyhow!(e)))?;
         let validator_addresses = self
             .rpc_loader
             .load_many(validator_keys.clone())
             .await
-            .map_err(|e| RpcError::Internal(anyhow::anyhow!("{e}")))?;
+            .map_err(|e| Error::LoadValidatorAddresses(e.to_string()))
+            .map_err(|e| RpcError::<Error>::InternalError(anyhow::anyhow!(e)))?;
 
         // Group stakes by (validator_address, pool_id) to match the DelegatedStake response format.
         let mut grouped: std::collections::BTreeMap<(SuiAddress, ObjectID), Vec<Stake>> =
