@@ -27,7 +27,6 @@ mod linearizer;
 mod metrics;
 mod network;
 mod observer_service;
-mod proposed_block_handler;
 mod round_prober;
 mod round_tracker;
 mod stake_aggregator;
@@ -54,7 +53,7 @@ mod randomized_tests;
 
 /// Exported Consensus API.
 pub use authority_node::{ConsensusAuthority, NetworkType};
-pub use block::{BlockAPI, CertifiedBlock};
+pub use block::BlockAPI;
 
 /// Exported API for testing and tools.
 pub use block::{TestBlock, Transaction, VerifiedBlock};

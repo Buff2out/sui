@@ -9,11 +9,9 @@ use consensus_config::{
 use consensus_config::{ChainType, ConsensusProtocolConfig};
 use consensus_types::block::Round;
 use itertools::Itertools;
-use mysten_metrics::spawn_logged_monitored_task;
 use mysten_network::Multiaddr;
 use parking_lot::RwLock;
 use prometheus::Registry;
-use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 use crate::{
@@ -35,7 +33,6 @@ use crate::{
         CommitSyncerClient, NetworkManager, SynchronizerClient, tonic_network::TonicManager,
     },
     observer_service::ObserverService,
-    proposed_block_handler::ProposedBlockHandler,
     round_prober::{RoundProber, RoundProberHandle},
     round_tracker::RoundTracker,
     storage::rocksdb_store::RocksDBStore,
@@ -139,7 +136,6 @@ where
 
     commit_syncer_handle: CommitSyncerHandle,
     round_prober_handle: RoundProberHandle,
-    proposed_block_handler: JoinHandle<()>,
     leader_timeout_handle: LeaderTimeoutTaskHandle,
     core_thread_handle: CoreThreadHandle,
     subscriber: Subscriber<N::ValidatorClient, AuthorityService<ChannelCoreThreadDispatcher>>,
@@ -253,15 +249,6 @@ where
 
         let transaction_certifier =
             TransactionCertifier::new(context.clone(), block_verifier.clone(), dag_state.clone());
-
-        let mut proposed_block_handler = ProposedBlockHandler::new(
-            context.clone(),
-            signals_receivers.block_broadcast_receiver(),
-            transaction_certifier.clone(),
-        );
-
-        let proposed_block_handler =
-            spawn_logged_monitored_task!(proposed_block_handler.run(), "proposed_block_handler");
 
         let sync_last_known_own_block = boot_counter == 0
             && !context
@@ -415,7 +402,6 @@ where
             synchronizer,
             commit_syncer_handle,
             round_prober_handle,
-            proposed_block_handler,
             leader_timeout_handle,
             core_thread_handle,
             subscriber,
@@ -441,7 +427,6 @@ where
         };
         self.commit_syncer_handle.stop().await;
         self.round_prober_handle.stop().await;
-        self.proposed_block_handler.abort();
         self.leader_timeout_handle.stop().await;
         // Shutdown Core to stop block productions and broadcast.
         self.core_thread_handle.stop().await;
