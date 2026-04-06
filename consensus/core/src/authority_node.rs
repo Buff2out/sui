@@ -39,7 +39,7 @@ use crate::{
     subscriber::Subscriber,
     synchronizer::{Synchronizer, SynchronizerHandle},
     transaction::{TransactionClient, TransactionConsumer, TransactionVerifier},
-    transaction_certifier::TransactionCertifier,
+    transaction_vote_tracker::TransactionVoteTracker,
 };
 
 /// ConsensusAuthority is used by Sui to manage the lifetime of AuthorityNode.
@@ -247,8 +247,8 @@ where
             transaction_verifier,
         ));
 
-        let transaction_certifier =
-            TransactionCertifier::new(context.clone(), block_verifier.clone(), dag_state.clone());
+        let transaction_vote_tracker =
+            TransactionVoteTracker::new(context.clone(), block_verifier.clone(), dag_state.clone());
 
         let sync_last_known_own_block = boot_counter == 0
             && !context
@@ -274,7 +274,7 @@ where
             context.clone(),
             commit_consumer,
             dag_state.clone(),
-            transaction_certifier.clone(),
+            transaction_vote_tracker.clone(),
             leader_schedule.clone(),
         )
         .await;
@@ -296,7 +296,7 @@ where
             context.clone(),
             leader_schedule,
             tx_consumer,
-            transaction_certifier.clone(),
+            transaction_vote_tracker.clone(),
             block_manager,
             commit_observer,
             core_signals,
@@ -320,7 +320,7 @@ where
             core_dispatcher.clone(),
             commit_vote_monitor.clone(),
             block_verifier.clone(),
-            transaction_certifier.clone(),
+            transaction_vote_tracker.clone(),
             round_tracker.clone(),
             dag_state.clone(),
             sync_last_known_own_block,
@@ -332,7 +332,7 @@ where
             commit_vote_monitor.clone(),
             commit_consumer_monitor.clone(),
             block_verifier.clone(),
-            transaction_certifier.clone(),
+            transaction_vote_tracker.clone(),
             round_tracker.clone(),
             commit_syncer_client.clone(),
             dag_state.clone(),
@@ -356,7 +356,7 @@ where
             synchronizer.clone(),
             core_dispatcher,
             signals_receivers.block_broadcast_receiver(),
-            transaction_certifier,
+            transaction_vote_tracker,
             dag_state.clone(),
             store.clone(),
         ));

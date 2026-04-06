@@ -17,7 +17,7 @@ use crate::{
     stake_aggregator::{QuorumThreshold, StakeAggregator},
 };
 
-/// TransactionCertifier has the following purposes:
+/// TransactionVoteTracker has the following purposes:
 /// 1. Keeps track of own votes on transactions, and allows the votes to be retrieved
 ///    later in core after acceptance of the blocks containing the transactions.
 /// 2. Aggregates reject votes on transactions, and allows the aggregated votes
@@ -27,23 +27,23 @@ use crate::{
 /// guaranteed that no validator can observe a certification of the transaction, with <= f malicious
 /// stake.
 #[derive(Clone)]
-pub struct TransactionCertifier {
+pub struct TransactionVoteTracker {
     // The state of blocks being voted on.
-    certifier_state: Arc<RwLock<CertifierState>>,
+    vote_tracker_state: Arc<RwLock<VoteTrackerState>>,
     // Verify transactions during recovery.
     block_verifier: Arc<dyn BlockVerifier>,
     // The state of the DAG.
     dag_state: Arc<RwLock<DagState>>,
 }
 
-impl TransactionCertifier {
+impl TransactionVoteTracker {
     pub fn new(
         context: Arc<Context>,
         block_verifier: Arc<dyn BlockVerifier>,
         dag_state: Arc<RwLock<DagState>>,
     ) -> Self {
         Self {
-            certifier_state: Arc::new(RwLock::new(CertifierState::new(context))),
+            vote_tracker_state: Arc::new(RwLock::new(VoteTrackerState::new(context))),
             block_verifier,
             dag_state,
         }
@@ -51,12 +51,12 @@ impl TransactionCertifier {
 
     /// Recovers all blocks from DB after the given round.
     ///
-    /// This is useful for initializing the certifier state
+    /// This is useful for initializing the vote tracker state
     /// for future commits and block proposals.
     pub(crate) fn recover_blocks_after_round(&self, after_round: Round) {
-        let context = self.certifier_state.read().context.clone();
+        let context = self.vote_tracker_state.read().context.clone();
         if !context.protocol_config.transaction_voting_enabled() {
-            info!("Skipping certifier recovery in non-mysticeti fast path mode");
+            info!("Skipping vote tracker recovery in non-mysticeti fast path mode");
             return;
         }
 
@@ -64,7 +64,7 @@ impl TransactionCertifier {
 
         let recovery_start_round = after_round + 1;
         info!(
-            "Recovering certifier state from round {}",
+            "Recovering vote tracker state from round {}",
             recovery_start_round,
         );
 
@@ -95,7 +95,7 @@ impl TransactionCertifier {
     ///
     /// In addition, add_voted_blocks() will eventually process reject votes contained in the input blocks.
     pub(crate) fn recover_and_vote_on_blocks(&self, blocks: Vec<VerifiedBlock>) {
-        let context = self.certifier_state.read().context.clone();
+        let context = self.vote_tracker_state.read().context.clone();
         let should_vote_blocks = {
             let dag_state = self.dag_state.read();
             let gc_round = dag_state.gc_round();
@@ -129,24 +129,31 @@ impl TransactionCertifier {
                 }
             })
             .collect::<Vec<_>>();
-        self.certifier_state.write().add_voted_blocks(voted_blocks);
+        self.vote_tracker_state
+            .write()
+            .add_voted_blocks(voted_blocks);
     }
 
     /// Stores own reject votes on input blocks, and aggregates reject votes from the input blocks.
     pub fn add_voted_blocks(&self, voted_blocks: Vec<(VerifiedBlock, Vec<TransactionIndex>)>) {
-        self.certifier_state.write().add_voted_blocks(voted_blocks);
+        self.vote_tracker_state
+            .write()
+            .add_voted_blocks(voted_blocks);
     }
 
     /// Retrieves own votes on peer block transactions.
     pub(crate) fn get_own_votes(&self, block_refs: Vec<BlockRef>) -> Vec<BlockTransactionVotes> {
         let mut votes = vec![];
-        let certifier_state = self.certifier_state.read();
+        let vote_tracker_state = self.vote_tracker_state.read();
         for block_ref in block_refs {
-            if block_ref.round <= certifier_state.gc_round {
+            if block_ref.round <= vote_tracker_state.gc_round {
                 continue;
             }
-            let vote_info = certifier_state.votes.get(&block_ref).unwrap_or_else(|| {
-                panic!("Ancestor block {} not found in certifier state", block_ref)
+            let vote_info = vote_tracker_state.votes.get(&block_ref).unwrap_or_else(|| {
+                panic!(
+                    "Ancestor block {} not found in vote tracker state",
+                    block_ref
+                )
             });
             if !vote_info.own_reject_txn_votes.is_empty() {
                 votes.push(BlockTransactionVotes {
@@ -166,7 +173,7 @@ impl TransactionCertifier {
         block_ref: &BlockRef,
     ) -> Option<Vec<(TransactionIndex, Stake)>> {
         let accumulated_reject_votes = self
-            .certifier_state
+            .vote_tracker_state
             .read()
             .votes
             .get(block_ref)?
@@ -178,7 +185,7 @@ impl TransactionCertifier {
     }
 
     /// Runs garbage collection on the internal state by removing data for blocks <= gc_round,
-    /// and updates the GC round for the certifier.
+    /// and updates the GC round for the vote tracker.
     ///
     /// IMPORTANT: the gc_round used here can trail the latest gc_round from DagState.
     /// This is because the gc round here is determined by CommitFinalizer, which needs to process
@@ -188,18 +195,18 @@ impl TransactionCertifier {
         let dag_state_gc_round = self.dag_state.read().gc_round();
         assert!(
             gc_round <= dag_state_gc_round,
-            "TransactionCertifier cannot GC higher than DagState GC round ({} > {})",
+            "TransactionVoteTracker cannot GC higher than DagState GC round ({} > {})",
             gc_round,
             dag_state_gc_round
         );
-        self.certifier_state.write().update_gc_round(gc_round);
+        self.vote_tracker_state.write().update_gc_round(gc_round);
     }
 }
 
-/// CertifierState keeps track of votes received by each transaction and block,
+/// VoteTrackerState keeps track of votes received by each transaction and block,
 /// and helps determine if votes reach a quorum. Reject votes can start accumulating
 /// even before the target block is received by this authority.
-struct CertifierState {
+struct VoteTrackerState {
     context: Arc<Context>,
 
     // Maps received blocks' refs to votes on those blocks from other blocks.
@@ -210,7 +217,7 @@ struct CertifierState {
     gc_round: Round,
 }
 
-impl CertifierState {
+impl VoteTrackerState {
     fn new(context: Arc<Context>) -> Self {
         Self {
             context,
@@ -231,7 +238,7 @@ impl CertifierState {
         reject_txn_votes: Vec<TransactionIndex>,
     ) {
         if voted_block.round() <= self.gc_round {
-            // Ignore the block and own votes, since they are outside of certifier GC bound.
+            // Ignore the block and own votes, since they are outside of vote tracker GC bound.
             return;
         }
 
@@ -306,4 +313,163 @@ struct VoteInfo {
     own_reject_txn_votes: Vec<TransactionIndex>,
     // Accumulates reject votes per transaction in this block.
     reject_txn_votes: BTreeMap<TransactionIndex, StakeAggregator<QuorumThreshold>>,
+}
+
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use consensus_config::Parameters;
+
+    use crate::{
+        TestBlock, Transaction, VerifiedBlock, block::BlockTransactionVotes, context::Context,
+        metrics::test_metrics,
+    };
+
+    use super::*;
+
+    // 4 authorities with stakes [1, 2, 3, 4], total 10.
+    #[tokio::test]
+    async fn test_reject_vote_tracking() {
+        telemetry_subscribers::init_for_testing();
+        let (committee, _keypairs) =
+            consensus_config::local_committee_and_keys(0, vec![1, 2, 3, 4]);
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let context = Arc::new(Context::new(
+            0,
+            consensus_config::AuthorityIndex::new_for_test(0),
+            committee,
+            Parameters {
+                db_path: temp_dir.path().to_path_buf(),
+                ..Default::default()
+            },
+            consensus_config::ConsensusProtocolConfig::for_testing(),
+            test_metrics(),
+            Arc::new(crate::Clock::default()),
+        ));
+
+        let transactions = vec![Transaction::new(vec![0u8; 16]); 4];
+
+        // Round 1: create a block from each authority.
+        let round_1_blocks: Vec<VerifiedBlock> = (0..4)
+            .map(|author| {
+                VerifiedBlock::new_for_test(
+                    TestBlock::new(1, author)
+                        .set_transactions(transactions.clone())
+                        .build(),
+                )
+            })
+            .collect();
+
+        // Add round 1 blocks with own reject votes:
+        // - reject txn 0 of block from authority 0
+        // - reject txns 1 and 2 of block from authority 1
+        // - no rejects for blocks from authorities 2 and 3
+        let mut state = VoteTrackerState::new(context.clone());
+        state.add_voted_blocks(vec![
+            (round_1_blocks[0].clone(), vec![0]),
+            (round_1_blocks[1].clone(), vec![1, 2]),
+            (round_1_blocks[2].clone(), vec![]),
+            (round_1_blocks[3].clone(), vec![]),
+        ]);
+
+        // Verify own reject votes are stored correctly.
+        let vote_info_0 = state.votes.get(&round_1_blocks[0].reference()).unwrap();
+        assert_eq!(vote_info_0.own_reject_txn_votes, vec![0]);
+        let vote_info_1 = state.votes.get(&round_1_blocks[1].reference()).unwrap();
+        assert_eq!(vote_info_1.own_reject_txn_votes, vec![1, 2]);
+        let vote_info_2 = state.votes.get(&round_1_blocks[2].reference()).unwrap();
+        assert!(vote_info_2.own_reject_txn_votes.is_empty());
+
+        // No reject votes have been aggregated yet (round 1 blocks have no transaction_votes).
+        assert!(vote_info_0.reject_txn_votes.is_empty());
+        assert!(vote_info_1.reject_txn_votes.is_empty());
+
+        // Round 2: authorities 0, 1, 2 create blocks that reject transactions in round 1 blocks.
+        let ancestors: Vec<BlockRef> = round_1_blocks.iter().map(|b| b.reference()).collect();
+
+        // Authority 0 (stake 1) rejects txn 0 of block[0] and txn 1 of block[1].
+        let block_r2_a0 = VerifiedBlock::new_for_test(
+            TestBlock::new(2, 0)
+                .set_ancestors_raw(ancestors.clone())
+                .set_transactions(transactions.clone())
+                .set_transaction_votes(vec![
+                    BlockTransactionVotes {
+                        block_ref: round_1_blocks[0].reference(),
+                        rejects: vec![0],
+                    },
+                    BlockTransactionVotes {
+                        block_ref: round_1_blocks[1].reference(),
+                        rejects: vec![1],
+                    },
+                ])
+                .build(),
+        );
+
+        // Authority 1 (stake 2) rejects txn 0 of block[0] and txns 1,2 of block[1].
+        let block_r2_a1 = VerifiedBlock::new_for_test(
+            TestBlock::new(2, 1)
+                .set_ancestors_raw(ancestors.clone())
+                .set_transactions(transactions.clone())
+                .set_transaction_votes(vec![
+                    BlockTransactionVotes {
+                        block_ref: round_1_blocks[0].reference(),
+                        rejects: vec![0],
+                    },
+                    BlockTransactionVotes {
+                        block_ref: round_1_blocks[1].reference(),
+                        rejects: vec![1, 2],
+                    },
+                ])
+                .build(),
+        );
+
+        // Authority 2 (stake 3) rejects txn 2 of block[1] only.
+        let block_r2_a2 = VerifiedBlock::new_for_test(
+            TestBlock::new(2, 2)
+                .set_ancestors_raw(ancestors.clone())
+                .set_transactions(transactions.clone())
+                .set_transaction_votes(vec![BlockTransactionVotes {
+                    block_ref: round_1_blocks[1].reference(),
+                    rejects: vec![2],
+                }])
+                .build(),
+        );
+
+        state.add_voted_blocks(vec![
+            (block_r2_a0, vec![]),
+            (block_r2_a1, vec![]),
+            (block_r2_a2, vec![]),
+        ]);
+
+        // Verify aggregated reject votes for block[0]:
+        // txn 0: authority 0 (stake 1) + authority 1 (stake 2) = 3
+        let reject_votes_0 = &state
+            .votes
+            .get(&round_1_blocks[0].reference())
+            .unwrap()
+            .reject_txn_votes;
+        assert_eq!(reject_votes_0.len(), 1);
+        assert_eq!(reject_votes_0.get(&0).unwrap().stake(), 3);
+
+        // Verify aggregated reject votes for block[1]:
+        // txn 1: authority 0 (stake 1) + authority 1 (stake 2) = 3
+        // txn 2: authority 1 (stake 2) + authority 2 (stake 3) = 5
+        let reject_votes_1 = &state
+            .votes
+            .get(&round_1_blocks[1].reference())
+            .unwrap()
+            .reject_txn_votes;
+        assert_eq!(reject_votes_1.len(), 2);
+        assert_eq!(reject_votes_1.get(&1).unwrap().stake(), 3);
+        assert_eq!(reject_votes_1.get(&2).unwrap().stake(), 5);
+
+        // block[2] and block[3] have no reject votes from others.
+        let reject_votes_2 = &state
+            .votes
+            .get(&round_1_blocks[2].reference())
+            .unwrap()
+            .reject_txn_votes;
+        assert!(reject_votes_2.is_empty());
+    }
 }

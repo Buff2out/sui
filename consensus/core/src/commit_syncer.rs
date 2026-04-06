@@ -62,7 +62,7 @@ use crate::{
     network::{CommitSyncerClient, ObserverNetworkClient, ValidatorNetworkClient},
     round_tracker::RoundTracker,
     stake_aggregator::{QuorumThreshold, StakeAggregator},
-    transaction_certifier::TransactionCertifier,
+    transaction_vote_tracker::TransactionVoteTracker,
 };
 
 // Handle to stop the CommitSyncer loop.
@@ -119,7 +119,7 @@ where
         commit_vote_monitor: Arc<CommitVoteMonitor>,
         commit_consumer_monitor: Arc<CommitConsumerMonitor>,
         block_verifier: Arc<dyn BlockVerifier>,
-        transaction_certifier: TransactionCertifier,
+        transaction_vote_tracker: TransactionVoteTracker,
         round_tracker: Arc<RwLock<RoundTracker>>,
         network_client: Arc<CommitSyncerClient<VC, OC>>,
         dag_state: Arc<RwLock<DagState>>,
@@ -130,7 +130,7 @@ where
             commit_vote_monitor,
             commit_consumer_monitor,
             block_verifier,
-            transaction_certifier,
+            transaction_vote_tracker,
             round_tracker,
             network_client,
             dag_state,
@@ -705,7 +705,7 @@ where
                 // themselves.
                 if inner.context.protocol_config.transaction_voting_enabled() {
                     inner
-                        .transaction_certifier
+                        .transaction_vote_tracker
                         .add_voted_blocks(vec![(block.clone(), vec![])]);
                 }
             }
@@ -783,7 +783,7 @@ struct Inner<VC: ValidatorNetworkClient, OC: ObserverNetworkClient> {
     commit_vote_monitor: Arc<CommitVoteMonitor>,
     commit_consumer_monitor: Arc<CommitConsumerMonitor>,
     block_verifier: Arc<dyn BlockVerifier>,
-    transaction_certifier: TransactionCertifier,
+    transaction_vote_tracker: TransactionVoteTracker,
     round_tracker: Arc<RwLock<RoundTracker>>,
     network_client: Arc<CommitSyncerClient<VC, OC>>,
     dag_state: Arc<RwLock<DagState>>,
@@ -850,7 +850,7 @@ impl<VC: ValidatorNetworkClient, OC: ObserverNetworkClient> Inner<VC, OC> {
             let (block, reject_transaction_votes) =
                 self.block_verifier.verify_and_vote(block, serialized)?;
             if self.context.protocol_config.transaction_voting_enabled() {
-                self.transaction_certifier
+                self.transaction_vote_tracker
                     .add_voted_blocks(vec![(block.clone(), reject_transaction_votes)]);
             }
             for vote in block.commit_votes() {
@@ -902,7 +902,7 @@ mod tests {
         network::{BlockStream, CommitSyncerClient, ObserverNetworkClient, ValidatorNetworkClient},
         round_tracker::RoundTracker,
         storage::mem_store::MemStore,
-        transaction_certifier::TransactionCertifier,
+        transaction_vote_tracker::TransactionVoteTracker,
     };
 
     #[derive(Default)]
@@ -1024,8 +1024,8 @@ mod tests {
         ));
         let store = Arc::new(MemStore::new());
         let dag_state = Arc::new(RwLock::new(DagState::new(context.clone(), store)));
-        let transaction_certifier =
-            TransactionCertifier::new(context.clone(), block_verifier.clone(), dag_state.clone());
+        let transaction_vote_tracker =
+            TransactionVoteTracker::new(context.clone(), block_verifier.clone(), dag_state.clone());
         let commit_vote_monitor = Arc::new(CommitVoteMonitor::new(context.clone()));
         let commit_consumer_monitor = Arc::new(CommitConsumerMonitor::new(0, 0));
         let round_tracker = Arc::new(RwLock::new(RoundTracker::new(context.clone(), vec![])));
@@ -1035,7 +1035,7 @@ mod tests {
             commit_vote_monitor.clone(),
             commit_consumer_monitor.clone(),
             block_verifier,
-            transaction_certifier,
+            transaction_vote_tracker,
             round_tracker,
             network_client,
             dag_state,
