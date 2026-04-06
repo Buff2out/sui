@@ -4,22 +4,36 @@
 use anyhow::Context as _;
 use diesel::ExpressionMethods;
 use diesel::QueryDsl;
+use futures::future;
 
 use jsonrpsee::core::RpcResult;
 use jsonrpsee::http_client::HttpClient;
 use jsonrpsee::proc_macros::rpc;
+use move_core_types::language_storage::StructTag;
+use std::sync::Arc;
+
+use async_graphql::dataloader::DataLoader;
+use sui_indexer_alt_reader::governance::RewardsKey;
+use sui_indexer_alt_reader::governance::ValidatorAddressKey;
+use sui_indexer_alt_reader::sui_rpc_client::SuiRpcClient;
 use sui_indexer_alt_schema::schema::kv_epoch_starts;
 use sui_json_rpc_api::GovernanceReadApiClient;
 use sui_json_rpc_types::DelegatedStake;
+use sui_json_rpc_types::Stake;
+use sui_json_rpc_types::StakeStatus;
 use sui_json_rpc_types::ValidatorApys;
 use sui_open_rpc::Module;
 use sui_open_rpc_macros::open_rpc;
+use sui_types::SUI_FRAMEWORK_ADDRESS;
 use sui_types::SUI_SYSTEM_STATE_OBJECT_ID;
 use sui_types::TypeTag;
 use sui_types::base_types::ObjectID;
 use sui_types::base_types::SuiAddress;
 use sui_types::dynamic_field::Field;
 use sui_types::dynamic_field::derive_dynamic_field_id;
+use sui_types::governance::STAKED_SUI_STRUCT_NAME;
+use sui_types::governance::STAKING_POOL_MODULE_NAME;
+use sui_types::governance::StakedSui;
 use sui_types::sui_serde::BigInt;
 use sui_types::sui_system_state::SuiSystemStateTrait;
 use sui_types::sui_system_state::SuiSystemStateWrapper;
@@ -27,6 +41,8 @@ use sui_types::sui_system_state::sui_system_state_inner_v1::SuiSystemStateInnerV
 use sui_types::sui_system_state::sui_system_state_inner_v2::SuiSystemStateInnerV2;
 use sui_types::sui_system_state::sui_system_state_summary::SuiSystemStateSummary;
 
+use crate::api::objects::filter;
+use crate::api::objects::filter::SuiObjectDataFilter;
 use crate::api::rpc_module::RpcModule;
 use crate::context::Context;
 use crate::data::load_live_deserialized;
@@ -44,6 +60,10 @@ trait GovernanceApi {
     /// Return a summary of the latest version of the Sui System State object (0x5), on-chain.
     #[method(name = "getLatestSuiSystemState")]
     async fn get_latest_sui_system_state(&self) -> RpcResult<SuiSystemStateSummary>;
+
+    /// Return all [DelegatedStake].
+    #[method(name = "getStakes")]
+    async fn get_stakes(&self, owner: SuiAddress) -> RpcResult<Vec<DelegatedStake>>;
 }
 
 #[open_rpc(namespace = "suix", tag = "Delegation Governance API")]
@@ -65,8 +85,26 @@ trait DelegationGovernanceApi {
     async fn get_validators_apy(&self) -> RpcResult<ValidatorApys>;
 }
 
+#[open_rpc(namespace = "suix_grpc", tag = "Grpc Delegation Governance API")]
+#[rpc(server, namespace = "suix_grpc")]
+trait GrpcDelegationGovernanceApi {
+    /// Return all [DelegatedStake].
+    #[method(name = "getStakes")]
+    async fn get_stakes(&self, owner: SuiAddress) -> RpcResult<Vec<DelegatedStake>>;
+}
+
 pub(crate) struct Governance(pub Context);
 pub(crate) struct DelegationGovernance(HttpClient);
+pub(crate) struct GrpcDelegationGovernance {
+    ctx: Context,
+    rpc_loader: Arc<DataLoader<SuiRpcClient>>,
+}
+
+impl GrpcDelegationGovernance {
+    pub(crate) fn new(ctx: Context, rpc_loader: Arc<DataLoader<SuiRpcClient>>) -> Self {
+        Self { ctx, rpc_loader }
+    }
+}
 
 impl DelegationGovernance {
     pub(crate) fn new(client: HttpClient) -> Self {
@@ -82,6 +120,117 @@ impl GovernanceApiServer for Governance {
 
     async fn get_latest_sui_system_state(&self) -> RpcResult<SuiSystemStateSummary> {
         Ok(latest_sui_system_state_response(&self.0).await?)
+    }
+}
+
+#[async_trait::async_trait]
+impl GrpcDelegationGovernanceApiServer for GrpcDelegationGovernance {
+    async fn get_stakes(&self, owner: SuiAddress) -> RpcResult<Vec<DelegatedStake>> {
+        let config = &self.ctx.config().objects;
+
+        let type_filter = Some(SuiObjectDataFilter::StructType(StructTag {
+            address: SUI_FRAMEWORK_ADDRESS,
+            module: STAKING_POOL_MODULE_NAME.to_owned(),
+            name: STAKED_SUI_STRUCT_NAME.to_owned(),
+            type_params: vec![],
+        }));
+
+        // Collect all StakedSui object IDs for this owner.
+        let mut all_stake_ids: Vec<ObjectID> = Vec::new();
+        let mut after_cursor = None;
+
+        loop {
+            let Page {
+                data: stake_ids,
+                next_cursor,
+                has_next_page,
+            } = filter::owned_objects(
+                &self.ctx,
+                owner,
+                &type_filter,
+                after_cursor,
+                Some(config.max_page_size),
+            )
+            .await?;
+
+            all_stake_ids.extend(stake_ids);
+            if !has_next_page {
+                break;
+            }
+            after_cursor = next_cursor;
+        }
+
+        // Load all StakedSui objects concurrently (DataLoader batches under the hood).
+        let staked_sui_futures = all_stake_ids
+            .iter()
+            .map(|id| load_live_deserialized::<StakedSui>(&self.ctx, *id));
+        let staked_suis: Vec<StakedSui> = future::try_join_all(staked_sui_futures)
+            .await
+            .context("Failed to load StakedSui objects")?;
+
+        // Batch-load rewards and validator addresses via the DataLoader.
+        let reward_keys: Vec<RewardsKey> = staked_suis
+            .iter()
+            .map(|s| RewardsKey(s.id().into()))
+            .collect();
+        let validator_keys: Vec<ValidatorAddressKey> = staked_suis
+            .iter()
+            .map(|s| ValidatorAddressKey(s.pool_id().into()))
+            .collect();
+
+        let rewards = self
+            .rpc_loader
+            .load_many(reward_keys.clone())
+            .await
+            .map_err(|e| RpcError::Internal(anyhow::anyhow!("{e}")))?;
+        let validator_addresses = self
+            .rpc_loader
+            .load_many(validator_keys.clone())
+            .await
+            .map_err(|e| RpcError::Internal(anyhow::anyhow!("{e}")))?;
+
+        // Group stakes by (validator_address, pool_id) to match the DelegatedStake response format.
+        let mut grouped: std::collections::BTreeMap<(SuiAddress, ObjectID), Vec<Stake>> =
+            std::collections::BTreeMap::new();
+
+        for (staked_sui, (rk, vk)) in staked_suis
+            .iter()
+            .zip(reward_keys.iter().zip(validator_keys.iter()))
+        {
+            let estimated_reward = rewards.get(rk).copied().unwrap_or(0);
+            let validator_address: SuiAddress = validator_addresses
+                .get(vk)
+                .map(|addr| SuiAddress::from(ObjectID::from(*addr)))
+                .unwrap_or_default();
+
+            let status = if estimated_reward > 0 {
+                StakeStatus::Active { estimated_reward }
+            } else {
+                StakeStatus::Pending
+            };
+
+            grouped
+                .entry((validator_address, staked_sui.pool_id()))
+                .or_default()
+                .push(Stake {
+                    staked_sui_id: staked_sui.id(),
+                    stake_request_epoch: staked_sui.request_epoch(),
+                    stake_active_epoch: staked_sui.activation_epoch(),
+                    principal: staked_sui.principal(),
+                    status,
+                });
+        }
+
+        Ok(grouped
+            .into_iter()
+            .map(
+                |((validator_address, staking_pool), stakes)| DelegatedStake {
+                    validator_address,
+                    staking_pool,
+                    stakes,
+                },
+            )
+            .collect())
     }
 }
 
@@ -121,6 +270,16 @@ impl DelegationGovernanceApiServer for DelegationGovernance {
 impl RpcModule for Governance {
     fn schema(&self) -> Module {
         GovernanceApiOpenRpc::module_doc()
+    }
+
+    fn into_impl(self) -> jsonrpsee::RpcModule<Self> {
+        self.into_rpc()
+    }
+}
+
+impl RpcModule for GrpcDelegationGovernance {
+    fn schema(&self) -> Module {
+        GrpcDelegationGovernanceApiOpenRpc::module_doc()
     }
 
     fn into_impl(self) -> jsonrpsee::RpcModule<Self> {

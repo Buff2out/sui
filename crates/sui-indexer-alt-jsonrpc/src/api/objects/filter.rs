@@ -65,7 +65,7 @@ pub(crate) type ObjectIDs = PageResponse<ObjectID, String>;
 /// Fetch ObjectIDs for a page of objects owned by `owner` that satisfy the given `filter` and
 /// pagination parameters. Returns the IDs and a cursor pointing to the last result (if there are
 /// any results).
-pub(super) async fn owned_objects(
+pub(crate) async fn owned_objects(
     ctx: &Context,
     owner: SuiAddress,
     filter: &Option<SuiObjectDataFilter>,

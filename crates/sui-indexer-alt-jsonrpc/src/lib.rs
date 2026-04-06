@@ -31,6 +31,7 @@ use crate::api::coin::Coins;
 use crate::api::dynamic_fields::DynamicFields;
 use crate::api::governance::DelegationGovernance;
 use crate::api::governance::Governance;
+use crate::api::governance::GrpcDelegationGovernance;
 use crate::api::move_utils::MoveUtils;
 use crate::api::name_service::NameService;
 use crate::api::objects::Objects;
@@ -311,7 +312,7 @@ pub async fn start_rpc(
             SuiRpcClient::new(fullnode_rpc_url.as_str(), Some("fullnode_grpc"), registry)
                 .map_err(|e| anyhow::anyhow!(e))?;
         let rpc_loader = Arc::new(DataLoader::new(sui_rpc_client, tokio::spawn));
-        // TODO: wire rpc_loader into new Governance module
+        rpc.add_module(GrpcDelegationGovernance::new(context.clone(), rpc_loader))?;
     } else {
         warn!(
             "No fullnode rpc url provided, DelegationGovernance and Write modules will not be added."
