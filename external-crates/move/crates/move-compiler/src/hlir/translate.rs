@@ -2,6 +2,7 @@
 // Copyright (c) The Move Contributors
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::csp;
 use crate::{
     debug_display, debug_display_verbose, diag,
     diagnostics::{Diagnostic, DiagnosticReporter, Diagnostics, warning_filters::WarningFilters},
@@ -13,12 +14,13 @@ use crate::{
         match_compilation,
     },
     ice, ice_assert,
-    naming::ast::{self as N},
+    naming::ast as N,
     parser::ast::{
         Ability_, BinOp, BinOp_, ConstantName, DatatypeName, Field, FunctionName, TargetKind,
         VariantName,
     },
     shared::{
+        csp,
         macro_frames::{ExpansionColor, expansion_color_eq},
         matching::{MATCH_TEMP_PREFIX, MatchContext, new_match_var_name},
         program_info::TypingProgramInfo,
@@ -876,11 +878,7 @@ fn tail(
                 if_block,
                 else_block,
             };
-            block.push_back(H::Statement::new(
-                eloc,
-                context.current_color.clone(),
-                if_else,
-            ));
+            block.push_back(csp(eloc, context.current_color.clone(), if_else));
             if arms_unreachable {
                 None
             } else {
@@ -937,11 +935,7 @@ fn tail(
                 enum_name,
                 arms,
             };
-            block.push_back(H::Statement::new(
-                eloc,
-                context.current_color.clone(),
-                variant_switch,
-            ));
+            block.push_back(csp(eloc, context.current_color.clone(), variant_switch));
             let result = if arms_unreachable {
                 None
             } else {
@@ -978,7 +972,7 @@ fn tail(
             };
             context.enter_named_block(name, binders, out_type.clone());
             let (loop_body, has_break) = process_loop_body(context, &name, *body);
-            block.push_back(H::Statement::new(
+            block.push_back(csp(
                 eloc,
                 context.current_color.clone(),
                 S::Loop {
@@ -1013,7 +1007,7 @@ fn tail(
             if let Some(exp) = final_exp {
                 bind_value_in_block(context, binders, Some(out_type), &mut body_block, exp);
             }
-            block.push_back(H::Statement::new(
+            block.push_back(csp(
                 eloc,
                 context.current_color.clone(),
                 S::NamedBlock {
@@ -1198,7 +1192,7 @@ fn value(
                 context.current_color.clone(),
                 C::Abort(code.exp.loc, code),
             ));
-            block.push_back(H::Statement::new(
+            block.push_back(csp(
                 eloc,
                 context.current_color.clone(),
                 S::IfElse {
@@ -1244,11 +1238,7 @@ fn value(
                 if_block,
                 else_block,
             };
-            block.push_back(H::Statement::new(
-                eloc,
-                context.current_color.clone(),
-                if_else,
-            ));
+            block.push_back(csp(eloc, context.current_color.clone(), if_else));
             if arms_unreachable {
                 make_exp(HE::Unreachable)
             } else {
@@ -1297,11 +1287,7 @@ fn value(
                 enum_name,
                 arms,
             };
-            block.push_back(H::Statement::new(
-                eloc,
-                context.current_color.clone(),
-                variant_switch,
-            ));
+            block.push_back(csp(eloc, context.current_color.clone(), variant_switch));
             let result = if arms_unreachable {
                 make_exp(HE::Unreachable)
             } else {
@@ -1327,7 +1313,7 @@ fn value(
             let (binders, bound_exp) = make_binders(context, eloc, out_type.clone());
             context.enter_named_block(name, binders, out_type.clone());
             let (loop_body, has_break) = process_loop_body(context, &name, *body);
-            block.push_back(H::Statement::new(
+            block.push_back(csp(
                 eloc,
                 context.current_color.clone(),
                 S::Loop {
@@ -1357,7 +1343,7 @@ fn value(
             let mut body_block = make_block!();
             let final_exp = value_block(context, &mut body_block, Some(&out_type), eloc, seq);
             bind_value_in_block(context, binders, Some(out_type), &mut body_block, final_exp);
-            block.push_back(H::Statement::new(
+            block.push_back(csp(
                 eloc,
                 context.current_color.clone(),
                 S::NamedBlock {
@@ -1888,7 +1874,7 @@ fn statement(context: &mut Context, block: &mut Block, e: T::Exp) {
             let mut else_block = make_block!();
             let alt = alt_opt.unwrap_or_else(|| Box::new(typing_unit_exp(eloc)));
             statement(context, &mut else_block, *alt);
-            block.push_back(H::Statement::new(
+            block.push_back(csp(
                 eloc,
                 context.current_color.clone(),
                 S::IfElse {
@@ -1924,11 +1910,7 @@ fn statement(context: &mut Context, block: &mut Block, e: T::Exp) {
                 enum_name,
                 arms,
             };
-            block.push_back(H::Statement::new(
-                eloc,
-                context.current_color.clone(),
-                variant_switch,
-            ));
+            block.push_back(csp(eloc, context.current_color.clone(), variant_switch));
             debug_print!(context.debug.match_variant_translation,
                          (lines "block" => block; verbose));
         }
@@ -1941,7 +1923,7 @@ fn statement(context: &mut Context, block: &mut Block, e: T::Exp) {
             context.enter_named_block(name, vec![], tunit(eloc));
             let mut body_block = make_block!();
             statement(context, &mut body_block, *body);
-            block.push_back(H::Statement::new(
+            block.push_back(csp(
                 eloc,
                 context.current_color.clone(),
                 S::While {
@@ -1958,7 +1940,7 @@ fn statement(context: &mut Context, block: &mut Block, e: T::Exp) {
             let (binders, bound_exp) = make_binders(context, eloc, out_type.clone());
             context.enter_named_block(name, binders, out_type);
             let (loop_body, has_break) = process_loop_body(context, &name, *body);
-            block.push_back(H::Statement::new(
+            block.push_back(csp(
                 eloc,
                 context.current_color.clone(),
                 S::Loop {
@@ -2119,10 +2101,10 @@ fn value_statement(context: &mut Context, block: &mut Block, e: T::Exp) {
 // -------------------------------------------------------------------------------------------------
 
 fn make_command(loc: Loc, color: ExpansionColor, command: H::Command_) -> H::Statement {
-    H::Statement::new(
+    csp(
         loc,
         color.clone(),
-        H::Statement_::Command(H::Command::new(loc, color, command)),
+        H::Statement_::Command(csp(loc, color, command)),
     )
 }
 
@@ -2230,15 +2212,15 @@ fn is_exp_list(e: &T::Exp) -> bool {
 
 macro_rules! hcmd {
     ($cmd:pat) => {
-        S::Command(H::Command { value: $cmd, .. })
+        S::Command($crate::csp!(_, _, $cmd))
     };
 }
 
 fn still_has_break(name: &BlockLabel, block: &Block) -> bool {
     use H::{Command_ as C, Statement_ as S};
 
-    fn has_break(name: &BlockLabel, stmt: &H::Statement) -> bool {
-        match &stmt.value {
+    fn has_break(name: &BlockLabel, csp!(_, _, stmt_): &H::Statement) -> bool {
+        match stmt_ {
             S::IfElse {
                 if_block,
                 else_block,
@@ -2333,10 +2315,10 @@ fn make_assignments(
         lvalues.push(ls);
         after.append(&mut af);
     }
-    result.push_back(H::Statement::new(
+    result.push_back(csp(
         loc,
         context.current_color.clone(),
-        S::Command(H::Command::new(
+        S::Command(csp(
             loc,
             context.current_color.clone(),
             C::Assign(case, lvalues, rvalue),
@@ -2530,32 +2512,32 @@ fn make_ignore_and_pop(block: &mut Block, color: ExpansionColor, exp: H::Exp) {
             E::Unit { .. } => (),
             E::Value(_) => (),
             _ => {
-                let c = H::Command_::IgnoreAndPop { pop_num: 0, exp };
-                block.push_back(H::Statement::new(
+                let c = csp(
                     loc,
                     color.clone(),
-                    H::Statement_::Command(H::Command::new(loc, color, c)),
-                ));
+                    H::Command_::IgnoreAndPop { pop_num: 0, exp },
+                );
+                block.push_back(csp(loc, color, H::Statement_::Command(c)));
             }
         },
         H::Type_::Single(_) => {
-            let c = H::Command_::IgnoreAndPop { pop_num: 1, exp };
-            block.push_back(H::Statement::new(
+            let c = csp(
                 loc,
                 color.clone(),
-                H::Statement_::Command(H::Command::new(loc, color, c)),
-            ));
+                H::Command_::IgnoreAndPop { pop_num: 1, exp },
+            );
+            block.push_back(csp(loc, color, H::Statement_::Command(c)));
         }
         H::Type_::Multiple(tys) => {
-            let c = H::Command_::IgnoreAndPop {
-                pop_num: tys.len(),
-                exp,
-            };
-            block.push_back(H::Statement::new(
+            let c = csp(
                 loc,
                 color.clone(),
-                H::Statement_::Command(H::Command::new(loc, color, c)),
-            ));
+                H::Command_::IgnoreAndPop {
+                    pop_num: tys.len(),
+                    exp,
+                },
+            );
+            block.push_back(csp(loc, color, H::Statement_::Command(c)));
         }
     };
 }
@@ -2667,10 +2649,10 @@ fn bind_value_in_block(
         .color
         .clone()
         .unwrap_or_else(|| context.current_color.clone());
-    stmts.push_back(H::Statement::new(
+    stmts.push_back(csp(
         loc,
         color.clone(),
-        S::Command(H::Command::new(
+        S::Command(csp(
             loc,
             color,
             C::Assign(H::AssignCase::Let, binders, rhs_exp),
@@ -2985,7 +2967,7 @@ fn process_binops(
                         if_block,
                         else_block,
                     };
-                    let if_stmt = H::Statement::new(loc, context.current_color.clone(), if_stmt_);
+                    let if_stmt = csp(loc, context.current_color.clone(), if_stmt_);
                     cur_block.push_back(if_stmt);
                 }
                 input_block.extend(cur_block);
@@ -3022,7 +3004,7 @@ fn process_binops(
                         if_block,
                         else_block,
                     };
-                    let if_stmt = H::Statement::new(loc, context.current_color.clone(), if_stmt_);
+                    let if_stmt = csp(loc, context.current_color.clone(), if_stmt_);
                     cur_block.push_back(if_stmt);
                 }
                 input_block.extend(cur_block);

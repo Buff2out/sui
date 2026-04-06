@@ -5,6 +5,7 @@
 mod state;
 
 use super::absint::*;
+use crate::csp;
 use crate::{
     diag,
     diagnostics::Diagnostics,
@@ -146,10 +147,9 @@ fn unused_mut_borrows(context: &super::CFGContext, mutably_used: RefExpInfoMap) 
 //**************************************************************************************************
 
 #[growing_stack]
-fn command(context: &mut Context, cmd: &Command) {
-    let loc = cmd.loc;
+fn command(context: &mut Context, csp!(loc, _, cmd_): &Command) {
     use Command_ as C;
-    match &cmd.value {
+    match cmd_ {
         C::Assign(_, ls, e) => {
             let values = exp(context, e);
             lvalues(context, ls, values);
@@ -158,7 +158,7 @@ fn command(context: &mut Context, cmd: &Command) {
             let value = assert_single_value(exp(context, er));
             assert!(!value.is_ref());
             let lvalue = assert_single_value(exp(context, el));
-            let diags = context.borrow_state.mutate(loc, lvalue);
+            let diags = context.borrow_state.mutate(*loc, lvalue);
             context.add_diags(diags);
         }
         C::JumpIf { cond: e, .. } => {
@@ -168,7 +168,7 @@ fn command(context: &mut Context, cmd: &Command) {
         C::VariantSwitch { subject, .. } => {
             let value = assert_single_value(exp(context, subject));
             assert!(value.is_ref());
-            let diags = context.borrow_state.variant_switch(loc, value);
+            let diags = context.borrow_state.variant_switch(*loc, value);
             context.add_diags(diags);
         }
         C::IgnoreAndPop { exp: e, .. } => {
@@ -178,7 +178,7 @@ fn command(context: &mut Context, cmd: &Command) {
 
         C::Return { exp: e, .. } => {
             let values = exp(context, e);
-            let diags = context.borrow_state.return_(loc, values);
+            let diags = context.borrow_state.return_(*loc, values);
             context.add_diags(diags);
         }
         C::Abort(_, e) => {

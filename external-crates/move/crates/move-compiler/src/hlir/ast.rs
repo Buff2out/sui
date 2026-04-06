@@ -237,18 +237,8 @@ pub enum Statement_ {
         block: Block,
     },
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Statement {
-    pub loc: Loc,
-    pub color: ExpansionColor,
-    pub value: Statement_,
-}
-
-impl Statement {
-    pub fn new(loc: Loc, color: ExpansionColor, value: Statement_) -> Self {
-        Self { loc, color, value }
-    }
-}
+/// HLIR statement: a `ColorSpanned` wrapper around `Statement_`.
+pub type Statement = crate::shared::ColorSpanned<Statement_>;
 
 pub type Block = VecDeque<Statement>;
 
@@ -296,18 +286,8 @@ pub enum Command_ {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Command {
-    pub loc: Loc,
-    pub color: ExpansionColor,
-    pub value: Command_,
-}
-
-impl Command {
-    pub fn new(loc: Loc, color: ExpansionColor, value: Command_) -> Self {
-        Self { loc, color, value }
-    }
-}
+/// HLIR command: a `ColorSpanned` wrapper around `Command_`.
+pub type Command = crate::shared::ColorSpanned<Command_>;
 
 // TODO: replace this with the `move_ir_types` one when possible.
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -448,7 +428,7 @@ pub enum UnannotatedExp_ {
     UnresolvedError,
 }
 pub type UnannotatedExp = Spanned<UnannotatedExp_>;
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Exp {
     pub ty: Type,
     pub exp: UnannotatedExp,
@@ -1339,7 +1319,7 @@ impl AstDebug for (Block, Box<Exp>) {
     }
 }
 
-impl AstDebug for Statement {
+impl AstDebug for crate::shared::ColorSpanned<Statement_> {
     fn ast_debug(&self, w: &mut AstWriter) {
         self.value.ast_debug(w)
     }
@@ -1410,7 +1390,7 @@ impl AstDebug for Statement_ {
     }
 }
 
-impl AstDebug for Command {
+impl AstDebug for crate::shared::ColorSpanned<Command_> {
     fn ast_debug(&self, w: &mut AstWriter) {
         self.value.ast_debug(w)
     }
