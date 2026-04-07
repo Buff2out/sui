@@ -164,6 +164,10 @@ async fn query_objects(
         });
     }
 
+    eprintln!(
+        "[DEBUG query_objects] owner={owner}, kind={kind:?}, object_type={object_type:?}, limit={}",
+        page.limit
+    );
     let results = ctx
         .consistent_reader()
         .list_owned_objects(
@@ -178,6 +182,10 @@ async fn query_objects(
         )
         .await
         .context("Failed to list owned objects")?;
+    eprintln!(
+        "[DEBUG query_objects] results: {} items",
+        results.results.len()
+    );
 
     let obj_ids = results
         .results

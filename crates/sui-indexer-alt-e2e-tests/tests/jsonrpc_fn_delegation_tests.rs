@@ -458,6 +458,107 @@ async fn test_get_stakes_invalid_params() {
 }
 
 #[sim_test]
+async fn test_grpc_get_stakes() {
+    let test_cluster = FnDelegationTestCluster::new()
+        .await
+        .expect("Failed to create test cluster");
+
+    let wallet = &test_cluster.onchain_cluster.wallet;
+    let validators = test_cluster.get_validator_addresses().await;
+    assert!(validators.len() >= 2, "need at least 2 validators");
+    let validator_a = validators[0];
+    let validator_b = validators[1];
+
+    // Stake once to validator A.
+    let tx_a = make_staking_transaction(wallet, validator_a).await;
+    let stake_owner_address = tx_a.data().transaction_data().sender();
+    wallet.execute_transaction_must_succeed(tx_a).await;
+
+    // Stake twice to validator B (from the same owner).
+    let tx_b1 = make_staking_transaction(wallet, validator_b).await;
+    wallet.execute_transaction_must_succeed(tx_b1).await;
+    let tx_b2 = make_staking_transaction(wallet, validator_b).await;
+    wallet.execute_transaction_must_succeed(tx_b2).await;
+
+    let cp = test_cluster
+        .onchain_cluster
+        .fullnode_handle
+        .sui_node
+        .state()
+        .get_latest_checkpoint_sequence_number()
+        .unwrap();
+
+    let timeout = Duration::from_secs(60);
+    test_cluster
+        .offchain
+        .wait_for_indexer(cp, timeout)
+        .await
+        .expect("Timed out waiting for indexer");
+    test_cluster
+        .offchain
+        .wait_for_consistent_store(cp, timeout)
+        .await
+        .expect("Timed out waiting for consistent store");
+    test_cluster
+        .offchain
+        .wait_for_bigtable(cp, timeout)
+        .await
+        .expect("Timed out waiting for bigtable");
+
+    // Query via the gRPC-backed endpoint.
+    let grpc_response = test_cluster
+        .execute_jsonrpc(
+            "suix_grpc_getStakes".to_string(),
+            json!({ "owner": stake_owner_address }),
+        )
+        .await
+        .unwrap();
+
+    let grpc_result = &grpc_response["result"];
+
+    // Should have 2 DelegatedStake entries (one per validator).
+    assert_eq!(grpc_result.as_array().unwrap().len(), 2);
+
+    // Find the entry for each validator.
+    let entry_a = grpc_result
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["validatorAddress"] == validator_a.to_string().as_str())
+        .expect("missing DelegatedStake for validator A");
+    let entry_b = grpc_result
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["validatorAddress"] == validator_b.to_string().as_str())
+        .expect("missing DelegatedStake for validator B");
+
+    // Validator A: 1 stake entry.
+    assert_eq!(entry_a["stakes"].as_array().unwrap().len(), 1);
+    // Validator B: 2 stake entries (staked twice).
+    assert_eq!(entry_b["stakes"].as_array().unwrap().len(), 2);
+
+    // All stakes should be Pending (epoch 0, no rewards yet).
+    for entry in grpc_result.as_array().unwrap() {
+        for stake in entry["stakes"].as_array().unwrap() {
+            assert!(stake["stakedSuiId"].is_string());
+            assert_eq!(stake["status"], "Pending");
+        }
+    }
+
+    // Compare with the JSON-RPC proxy response — they should match.
+    let jsonrpc_response = test_cluster
+        .execute_jsonrpc(
+            "suix_getStakes".to_string(),
+            json!({ "owner": stake_owner_address }),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(grpc_result, &jsonrpc_response["result"]);
+}
+
+#[sim_test]
 async fn test_get_validators_apy() {
     let test_cluster = FnDelegationTestCluster::new()
         .await
