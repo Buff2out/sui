@@ -1534,8 +1534,8 @@ fn exp(context: &mut Context, code: &mut IR::BytecodeBlock, e: H::Exp) {
     use IR::Bytecode_ as B;
     use Value_ as V;
     let saved_color = context.color.clone();
-    context.color = e.color.clone().unwrap_or_else(|| saved_color.clone());
-    let sp!(loc, e_) = e.exp;
+    context.color = e.exp.color.clone().unwrap_or_else(|| saved_color.clone());
+    let csp!(loc, _, e_) = e.exp;
     match e_ {
         E::Unreachable => panic!("ICE should not compile dead code"),
         E::UnresolvedError => panic!("ICE should not have reached compilation if there are errors"),
