@@ -384,6 +384,31 @@ async fn test_get_stakes_and_by_ids() {
         .execute_transaction_must_succeed(staking_transaction)
         .await;
 
+    let cp = test_cluster
+        .onchain_cluster
+        .fullnode_handle
+        .sui_node
+        .state()
+        .get_latest_checkpoint_sequence_number()
+        .unwrap();
+
+    let timeout = Duration::from_secs(60);
+    test_cluster
+        .offchain
+        .wait_for_indexer(cp, timeout)
+        .await
+        .expect("Timed out waiting for indexer");
+    test_cluster
+        .offchain
+        .wait_for_consistent_store(cp, timeout)
+        .await
+        .expect("Timed out waiting for consistent store");
+    test_cluster
+        .offchain
+        .wait_for_bigtable(cp, timeout)
+        .await
+        .expect("Timed out waiting for bigtable");
+
     // Get the stake by owner.
     let get_stakes_response = test_cluster
         .execute_jsonrpc(
@@ -508,7 +533,7 @@ async fn test_grpc_get_stakes() {
     // Query via the gRPC-backed endpoint.
     let grpc_response = test_cluster
         .execute_jsonrpc(
-            "suix_grpc_getStakes".to_string(),
+            "suix_getStakes".to_string(),
             json!({ "owner": stake_owner_address }),
         )
         .await

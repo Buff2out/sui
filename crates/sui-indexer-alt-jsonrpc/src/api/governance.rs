@@ -66,6 +66,14 @@ trait GovernanceApi {
 #[open_rpc(namespace = "suix", tag = "Delegation Governance API")]
 #[rpc(server, namespace = "suix")]
 trait DelegationGovernanceApi {
+    /// Return the validator APY
+    #[method(name = "getValidatorsApy")]
+    async fn get_validators_apy(&self) -> RpcResult<ValidatorApys>;
+}
+
+#[open_rpc(namespace = "suix", tag = "Grpc Delegation Governance API")]
+#[rpc(server, namespace = "suix")]
+trait GrpcDelegationGovernanceApi {
     /// Return one or more [DelegatedStake]. If a Stake was withdrawn its status will be Unstaked.
     #[method(name = "getStakesByIds")]
     async fn get_stakes_by_ids(
@@ -73,18 +81,6 @@ trait DelegationGovernanceApi {
         staked_sui_ids: Vec<ObjectID>,
     ) -> RpcResult<Vec<DelegatedStake>>;
 
-    /// Return all [DelegatedStake].
-    #[method(name = "getStakes")]
-    async fn get_stakes(&self, owner: SuiAddress) -> RpcResult<Vec<DelegatedStake>>;
-
-    /// Return the validator APY
-    #[method(name = "getValidatorsApy")]
-    async fn get_validators_apy(&self) -> RpcResult<ValidatorApys>;
-}
-
-#[open_rpc(namespace = "suix_grpc", tag = "Grpc Delegation Governance API")]
-#[rpc(server, namespace = "suix_grpc")]
-trait GrpcDelegationGovernanceApi {
     /// Return all [DelegatedStake].
     #[method(name = "getStakes")]
     async fn get_stakes(&self, owner: SuiAddress) -> RpcResult<Vec<DelegatedStake>>;
@@ -132,64 +128,11 @@ impl GovernanceApiServer for Governance {
     }
 }
 
-#[async_trait::async_trait]
-impl GrpcDelegationGovernanceApiServer for GrpcDelegationGovernance {
-    async fn get_stakes(&self, owner: SuiAddress) -> RpcResult<Vec<DelegatedStake>> {
-        eprintln!("[DEBUG grpc_get_stakes] called for owner={owner}");
-        let config = &self.ctx.config().objects;
-
-        // Debug: query without type filter to see all owned objects
-        let debug_all =
-            filter::owned_objects(&self.ctx, owner, &None, None, Some(config.max_page_size)).await;
-        eprintln!("[DEBUG grpc_get_stakes] ALL owned objects (no type filter): {debug_all:?}");
-
-        let type_filter = Some(SuiObjectDataFilter::StructType(StructTag {
-            address: SUI_SYSTEM_ADDRESS,
-            module: STAKING_POOL_MODULE_NAME.to_owned(),
-            name: STAKED_SUI_STRUCT_NAME.to_owned(),
-            type_params: vec![],
-        }));
-        eprintln!("[DEBUG grpc_get_stakes] type_filter: {type_filter:?}");
-
-        // Collect all StakedSui object IDs for this owner.
-        let mut all_stake_ids: Vec<ObjectID> = Vec::new();
-        let mut after_cursor = None;
-
-        loop {
-            let page_result = filter::owned_objects(
-                &self.ctx,
-                owner,
-                &type_filter,
-                after_cursor,
-                Some(config.max_page_size),
-            )
-            .await;
-            eprintln!("[DEBUG grpc_get_stakes] owned_objects result: {page_result:?}");
-
-            let Page {
-                data: stake_ids,
-                next_cursor,
-                has_next_page,
-            } = page_result?;
-
-            eprintln!(
-                "[DEBUG grpc_get_stakes] owned_objects page: {} ids, has_next={has_next_page}",
-                stake_ids.len()
-            );
-            all_stake_ids.extend(stake_ids);
-            if !has_next_page {
-                break;
-            }
-            after_cursor = next_cursor;
-        }
-
-        eprintln!(
-            "[DEBUG grpc_get_stakes] total stake_ids: {:?}",
-            all_stake_ids
-        );
-
-        // Load all StakedSui objects concurrently (DataLoader batches under the hood).
-        let staked_sui_futures = all_stake_ids
+impl GrpcDelegationGovernance {
+    /// Given a list of StakedSui object IDs, load them, fetch rewards and validator addresses,
+    /// and return grouped DelegatedStake entries.
+    async fn delegated_stakes(&self, stake_ids: Vec<ObjectID>) -> RpcResult<Vec<DelegatedStake>> {
+        let staked_sui_futures = stake_ids
             .iter()
             .map(|id| load_live_deserialized::<StakedSui>(&self.ctx, *id));
         let staked_suis: Vec<StakedSui> = future::try_join_all(staked_sui_futures)
@@ -197,12 +140,6 @@ impl GrpcDelegationGovernanceApiServer for GrpcDelegationGovernance {
             .map_err(|e| Error::LoadStakedSui(e.to_string()))
             .map_err(|e| RpcError::<Error>::InternalError(anyhow::anyhow!(e)))?;
 
-        eprintln!(
-            "[DEBUG grpc_get_stakes] loaded {} StakedSui objects",
-            staked_suis.len()
-        );
-
-        // Batch-load rewards and validator addresses via the DataLoader.
         let reward_keys: Vec<RewardsKey> = staked_suis
             .iter()
             .map(|s: &StakedSui| RewardsKey(s.id().into()))
@@ -225,11 +162,6 @@ impl GrpcDelegationGovernanceApiServer for GrpcDelegationGovernance {
             .map_err(|e| Error::LoadValidatorAddresses(e.to_string()))
             .map_err(|e| RpcError::<Error>::InternalError(anyhow::anyhow!(e)))?;
 
-        eprintln!(
-            "[DEBUG grpc_get_stakes] rewards={rewards:?}, validator_addresses={validator_addresses:?}"
-        );
-
-        // Group stakes by (validator_address, pool_id) to match the DelegatedStake response format.
         let mut grouped: std::collections::BTreeMap<(SuiAddress, ObjectID), Vec<Stake>> =
             std::collections::BTreeMap::new();
 
@@ -275,28 +207,54 @@ impl GrpcDelegationGovernanceApiServer for GrpcDelegationGovernance {
 }
 
 #[async_trait::async_trait]
-impl DelegationGovernanceApiServer for DelegationGovernance {
+impl GrpcDelegationGovernanceApiServer for GrpcDelegationGovernance {
     async fn get_stakes_by_ids(
         &self,
         staked_sui_ids: Vec<ObjectID>,
     ) -> RpcResult<Vec<DelegatedStake>> {
-        let Self(client) = self;
-
-        client
-            .get_stakes_by_ids(staked_sui_ids)
-            .await
-            .map_err(client_error_to_error_object)
+        self.delegated_stakes(staked_sui_ids).await
     }
 
     async fn get_stakes(&self, owner: SuiAddress) -> RpcResult<Vec<DelegatedStake>> {
-        let Self(client) = self;
+        let config = &self.ctx.config().objects;
 
-        client
-            .get_stakes(owner)
-            .await
-            .map_err(client_error_to_error_object)
+        let type_filter = Some(SuiObjectDataFilter::StructType(StructTag {
+            address: SUI_SYSTEM_ADDRESS,
+            module: STAKING_POOL_MODULE_NAME.to_owned(),
+            name: STAKED_SUI_STRUCT_NAME.to_owned(),
+            type_params: vec![],
+        }));
+
+        let mut all_stake_ids: Vec<ObjectID> = Vec::new();
+        let mut after_cursor = None;
+
+        loop {
+            let Page {
+                data: stake_ids,
+                next_cursor,
+                has_next_page,
+            } = filter::owned_objects(
+                &self.ctx,
+                owner,
+                &type_filter,
+                after_cursor,
+                Some(config.max_page_size),
+            )
+            .await?;
+
+            all_stake_ids.extend(stake_ids);
+            if !has_next_page {
+                break;
+            }
+            after_cursor = next_cursor;
+        }
+
+        self.delegated_stakes(all_stake_ids).await
     }
+}
 
+#[async_trait::async_trait]
+impl DelegationGovernanceApiServer for DelegationGovernance {
     async fn get_validators_apy(&self) -> RpcResult<ValidatorApys> {
         let Self(client) = self;
 
