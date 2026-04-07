@@ -1,26 +1,17 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::net::IpAddr;
-use std::net::Ipv4Addr;
-use std::net::SocketAddr;
+use std::time::Duration;
 
 use anyhow::Context;
-use prometheus::Registry;
 use reqwest::Client;
 use serde_json::Value;
 use serde_json::json;
-use sui_futures::service::Service;
-use sui_indexer_alt_jsonrpc::NodeArgs;
-use sui_indexer_alt_jsonrpc::RpcArgs;
-use sui_indexer_alt_jsonrpc::args::SystemPackageTaskArgs;
-use sui_indexer_alt_jsonrpc::config::RpcConfig;
-use sui_indexer_alt_jsonrpc::start_rpc;
-use sui_indexer_alt_reader::bigtable_reader::BigtableArgs;
-use sui_indexer_alt_reader::consistent_reader::ConsistentReaderArgs;
+use sui_indexer_alt_e2e_tests::OffchainCluster;
+use sui_indexer_alt_e2e_tests::OffchainClusterConfig;
+use sui_indexer_alt_e2e_tests::local_ingestion_client_args;
+use sui_indexer_alt_jsonrpc::NodeArgs as JsonRpcNodeArgs;
 use sui_macros::sim_test;
-use sui_pg_db::DbArgs;
-use sui_pg_db::temp::get_available_port;
 use sui_swarm_config::genesis_config::AccountConfig;
 use sui_test_transaction_builder::make_staking_transaction;
 use sui_types::base_types::SuiAddress;
@@ -31,68 +22,54 @@ use url::Url;
 
 struct FnDelegationTestCluster {
     onchain_cluster: TestCluster,
-    rpc_url: Url,
-    /// Hold on to the service so it doesn't get dropped (and therefore aborted) until the cluster
-    /// goes out of scope.
-    #[allow(unused)]
-    service: Service,
+    offchain: OffchainCluster,
     client: Client,
+    /// Checkpoint ingestion directory shared between TestCluster and OffchainCluster.
+    #[allow(unused)]
+    ingestion_dir: tempfile::TempDir,
 }
 
 impl FnDelegationTestCluster {
-    /// Creates a new test cluster with an RPC with transaction execution enabled.
+    /// Creates a new test cluster with a full indexing stack: Postgres (obj_versions),
+    /// consistent store (owned objects), BigTable (object content), and a gRPC client
+    /// to the fullnode (dry runs). Transaction execution is also enabled via the fullnode proxy.
     async fn new() -> anyhow::Result<Self> {
+        let (client_args, ingestion_dir) = local_ingestion_client_args();
+
         let onchain_cluster = TestClusterBuilder::new()
-            .with_num_validators(1)
-            .with_epoch_duration_ms(300_000) // 5 minutes
+            .with_num_validators(2)
+            .with_epoch_duration_ms(300_000)
             .with_accounts(vec![
                 AccountConfig {
                     address: None,
-                    gas_amounts: vec![1_000_000_000_000; 2],
+                    gas_amounts: vec![1_000_000_000_000; 5],
                 };
                 4
             ])
+            .with_data_ingestion_dir(ingestion_dir.path().to_owned())
             .build()
             .await;
 
-        // Unwrap since we know the URL should be valid.
         let fullnode_rpc_url = Url::parse(onchain_cluster.rpc_url())?;
 
-        let rpc_listen_address =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), get_available_port());
-        let rpc_url = Url::parse(&format!("http://{}/", rpc_listen_address))
-            .expect("Failed to parse RPC URL");
-
-        // We don't expose metrics in these tests, but we create a registry to collect them anyway.
-        let registry = Registry::new();
-
-        let rpc_args = RpcArgs {
-            rpc_listen_address,
-            ..Default::default()
-        };
-
-        let service = start_rpc(
-            None,
-            None,
-            DbArgs::default(),
-            BigtableArgs::default(),
-            ConsistentReaderArgs::default(),
-            rpc_args,
-            NodeArgs {
-                fullnode_rpc_url: Some(fullnode_rpc_url),
+        let offchain = OffchainCluster::new(
+            client_args,
+            OffchainClusterConfig {
+                jsonrpc_node_args: JsonRpcNodeArgs {
+                    fullnode_rpc_url: Some(fullnode_rpc_url),
+                },
+                ..Default::default()
             },
-            SystemPackageTaskArgs::default(),
-            RpcConfig::default(),
-            &registry,
+            &prometheus::Registry::new(),
         )
         .await
-        .expect("Failed to start JSON-RPC server");
+        .context("Failed to create off-chain cluster")?;
 
         Ok(Self {
             onchain_cluster,
-            rpc_url,
-            service,
+            offchain,
             client: Client::new(),
+            ingestion_dir,
         })
     }
 
@@ -134,15 +111,19 @@ impl FnDelegationTestCluster {
     }
 
     async fn get_validator_address(&self) -> SuiAddress {
+        self.get_validator_addresses().await[0]
+    }
+
+    async fn get_validator_addresses(&self) -> Vec<SuiAddress> {
         self.onchain_cluster
             .grpc_client()
             .get_system_state_summary(None)
             .await
             .unwrap()
             .active_validators
-            .first()
-            .unwrap()
-            .sui_address
+            .iter()
+            .map(|v| v.sui_address)
+            .collect()
     }
 
     async fn execute_jsonrpc(&self, method: String, params: Value) -> anyhow::Result<Value> {
@@ -155,7 +136,7 @@ impl FnDelegationTestCluster {
 
         let response = self
             .client
-            .post(self.rpc_url.clone())
+            .post(self.offchain.jsonrpc_url())
             .json(&query)
             .send()
             .await
