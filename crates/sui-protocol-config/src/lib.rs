@@ -4783,7 +4783,7 @@ impl ProtocolConfig {
                     // Re-enable unpaid amplification deferral protection (testnet + devnet)
                     if chain != Chain::Mainnet {
                         cfg.feature_flags.defer_unpaid_amplification = true;
-                        cfg.gasless_max_tps = Some(50);
+                        cfg.gasless_max_tps = Some(200);
                     }
                 }
                 // Use this template when making changes:
