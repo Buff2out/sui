@@ -886,7 +886,7 @@ impl KeyValueStoreReader for BigTableClient {
     async fn get_watermark_for_pipelines(
         &mut self,
         pipelines: &[&str],
-    ) -> Result<Option<Watermark>> {
+    ) -> Result<Option<WatermarkV2>> {
         let keys: Vec<Vec<u8>> = pipelines
             .iter()
             .map(|name| tables::watermarks::encode_key(name))
@@ -898,18 +898,28 @@ impl KeyValueStoreReader for BigTableClient {
             return Ok(None);
         }
 
-        // Reads the legacy `w` column. Every production write path in BigTableConnection
-        // keeps this column in sync alongside the new `w2`+`v` columns, so consumers of this
-        // method see the same data they always have.
-        let mut min_wm: Option<Watermark> = None;
+        // Hide rule: a row is "not present" if `checkpoint_hi_inclusive == None` or
+        // `checkpoint_hi_inclusive < reader_lo`. If any pipeline is hidden, every consumer
+        // of this method (RPC/graphql) treats the whole result as missing — match that
+        // semantic by short-circuiting to `Ok(None)`.
+        let mut min_wm: Option<WatermarkV2> = None;
         for (_, row) in &rows {
-            let Some(wm) = tables::watermarks::decode_legacy(row)? else {
+            let Some((wm, _version)) = tables::watermarks::decode_new(row)? else {
                 return Ok(None);
             };
-            min_wm = Some(match min_wm {
-                Some(prev) if prev.checkpoint_hi_inclusive <= wm.checkpoint_hi_inclusive => prev,
-                _ => wm,
-            });
+            if wm
+                .checkpoint_hi_inclusive
+                .is_none_or(|cp| cp < wm.reader_lo)
+            {
+                return Ok(None);
+            }
+            // Comparing `Option<u64>` works post-filter because both sides are `Some`.
+            if min_wm
+                .as_ref()
+                .is_none_or(|prev| wm.checkpoint_hi_inclusive < prev.checkpoint_hi_inclusive)
+            {
+                min_wm = Some(wm);
+            }
         }
 
         Ok(min_wm)
