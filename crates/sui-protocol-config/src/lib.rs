@@ -316,6 +316,7 @@ const TESTNET_USDC: &str =
 // Version 119: Enable the new VM.
 // Version 120: Disallow unused jump tables
 // Version 121: Re-enable defer_unpaid_amplification (devnet + testnet).
+// Version 121: Add timestamp_based_epoch_close feature flag.
 
 #[derive(Copy, Clone, Debug, Hash, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ProtocolVersion(u64);
@@ -1049,6 +1050,13 @@ struct FeatureFlags {
 
     #[serde(skip_serializing_if = "is_false")]
     disallow_jump_orphans: bool,
+
+    // If true, use consensus commit timestamps to determine epoch close instead of EndOfPublish voting.
+    // Each validator transitions from AcceptAllCerts to RejectAllCerts when the consensus commit
+    // timestamp exceeds the reconfiguration timestamp. EndOfPublish quorum still works as a
+    // fallback for manual epoch close.
+    #[serde(skip_serializing_if = "is_false")]
+    timestamp_based_epoch_close: bool,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -2735,6 +2743,10 @@ impl ProtocolConfig {
 
     pub fn disallow_jump_orphans(&self) -> bool {
         self.feature_flags.disallow_jump_orphans
+    }
+
+    pub fn timestamp_based_epoch_close(&self) -> bool {
+        self.feature_flags.timestamp_based_epoch_close
     }
 }
 
@@ -4779,6 +4791,9 @@ impl ProtocolConfig {
                     // Re-enable unpaid amplification deferral protection (testnet + devnet)
                     if chain != Chain::Mainnet {
                         cfg.feature_flags.defer_unpaid_amplification = true;
+                    }
+                    if chain != Chain::Mainnet && chain != Chain::Testnet {
+                        cfg.feature_flags.timestamp_based_epoch_close = true;
                     }
                 }
                 // Use this template when making changes:
