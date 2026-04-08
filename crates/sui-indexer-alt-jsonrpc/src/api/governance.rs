@@ -46,6 +46,8 @@ use crate::api::objects::filter;
 use crate::api::objects::filter::SuiObjectDataFilter;
 use crate::api::rpc_module::RpcModule;
 use crate::context::Context;
+use crate::data::latest_epoch;
+use crate::data::load_live;
 use crate::data::load_live_deserialized;
 use crate::error::RpcError;
 use crate::error::client_error_to_error_object;
@@ -106,36 +108,47 @@ impl DelegationGovernance {
 }
 
 impl GrpcDelegationGovernance {
-    /// Given a list of StakedSui object IDs, load them, fetch rewards and validator addresses,
-    /// and return grouped DelegatedStake entries.
+    /// Given a list of StakedSui object IDs, load them, fetch rewards and validator addresses, and
+    /// return grouped DelegatedStake entries.
+    ///
+    /// Returns only live staked objects. Stakes that have been withdrawn (or wrapped, deleted, or
+    /// never existed) will be ommitted from the response.
     async fn delegated_stakes(
         &self,
         stake_ids: Vec<ObjectID>,
     ) -> Result<Vec<DelegatedStake>, RpcError> {
-        let staked_sui_futures = stake_ids
-            .iter()
-            .map(|id| load_live_deserialized::<StakedSui>(&self.ctx, *id));
-        let staked_suis: Vec<StakedSui> = future::try_join_all(staked_sui_futures)
+        let staked_sui_futures = stake_ids.iter().map(|id| load_live(&self.ctx, *id));
+        let maybe_objects = future::try_join_all(staked_sui_futures)
             .await
             .context("Failed to load StakedSui objects")?;
 
+        let staked_suis: Vec<StakedSui> = maybe_objects
+            .into_iter()
+            .flatten()
+            .map(|object| {
+                let move_object = object.data.try_as_move().context("Not a Move object")?;
+                bcs::from_bytes::<StakedSui>(move_object.contents())
+                    .context("Failed to deserialize StakedSui")
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+
         let reward_keys: Vec<RewardsKey> = staked_suis
             .iter()
-            .map(|s: &StakedSui| RewardsKey(s.id().into()))
+            .map(|s| RewardsKey(s.id().into()))
             .collect();
         let validator_keys: Vec<ValidatorAddressKey> = staked_suis
             .iter()
-            .map(|s: &StakedSui| ValidatorAddressKey(s.pool_id().into()))
+            .map(|s| ValidatorAddressKey(s.pool_id().into()))
             .collect();
 
         let rewards = self
             .rpc_loader
-            .load_many(reward_keys.clone())
+            .load_many(reward_keys)
             .await
             .context("Failed to dry run rewards calculation")?;
         let validator_addresses = self
             .rpc_loader
-            .load_many(validator_keys.clone())
+            .load_many(validator_keys)
             .await
             .context("Failed to dry run validator address lookup")?;
         let current_epoch = latest_epoch(&self.ctx).await?;
@@ -143,15 +156,22 @@ impl GrpcDelegationGovernance {
         let mut grouped: std::collections::BTreeMap<(SuiAddress, ObjectID), Vec<Stake>> =
             std::collections::BTreeMap::new();
 
-        for (staked_sui, (rk, vk)) in staked_suis
-            .iter()
-            .zip(reward_keys.iter().zip(validator_keys.iter()))
-        {
-            let estimated_reward = rewards.get(rk).copied().unwrap_or(0);
-            let validator_address: SuiAddress = validator_addresses
-                .get(vk)
+        for staked_sui in &staked_suis {
+            let reward_key = RewardsKey(staked_sui.id().into());
+            let validator_key = ValidatorAddressKey(staked_sui.pool_id().into());
+
+            let estimated_reward = *rewards
+                .get(&reward_key)
+                .with_context(|| format!("Missing reward for StakedSui {}", staked_sui.id()))?;
+            let validator_address = validator_addresses
+                .get(&validator_key)
                 .map(|addr| SuiAddress::from(ObjectID::from(*addr)))
-                .unwrap_or_default();
+                .with_context(|| {
+                    format!(
+                        "Missing validator address for staking pool {}",
+                        staked_sui.pool_id()
+                    )
+                })?;
 
             let status = if current_epoch >= staked_sui.activation_epoch() {
                 StakeStatus::Active { estimated_reward }
@@ -304,24 +324,6 @@ async fn rgp_response(ctx: &Context) -> Result<BigInt<u64>, RpcError> {
         .context("Failed to fetch the reference gas price")?;
 
     Ok((rgp as u64).into())
-}
-
-/// Fetch the latest indexed epoch from `kv_epoch_starts`.
-async fn latest_epoch(ctx: &Context) -> Result<u64, RpcError> {
-    use kv_epoch_starts::dsl as e;
-
-    let mut conn = ctx
-        .pg_reader()
-        .connect()
-        .await
-        .context("Failed to connect to the database")?;
-
-    let epoch: i64 = conn
-        .first(e::kv_epoch_starts.select(e::epoch).order(e::epoch.desc()))
-        .await
-        .context("Failed to fetch the latest epoch")?;
-
-    Ok(epoch as u64)
 }
 
 /// Load data and generate response for `getLatestSuiSystemState`.

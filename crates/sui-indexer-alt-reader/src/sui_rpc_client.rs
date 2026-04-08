@@ -3,8 +3,6 @@
 
 use prometheus::Registry;
 use sui_rpc::Client;
-use tonic::body::Body;
-use tower::util::BoxService;
 
 use crate::metrics::MetricsLayer;
 

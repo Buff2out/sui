@@ -13,7 +13,9 @@ use sui_indexer_alt_e2e_tests::local_ingestion_client_args;
 use sui_indexer_alt_jsonrpc::NodeArgs as JsonRpcNodeArgs;
 use sui_macros::sim_test;
 use sui_swarm_config::genesis_config::AccountConfig;
+use sui_test_transaction_builder::TestTransactionBuilder;
 use sui_test_transaction_builder::make_staking_transaction;
+use sui_types::base_types::ObjectID;
 use sui_types::base_types::SuiAddress;
 use sui_types::transaction::TransactionDataAPI;
 use test_cluster::TestCluster;
@@ -617,5 +619,129 @@ async fn test_get_validators_apy() {
     assert_eq!(
         response["result"]["apys"][0]["address"],
         validator_address.to_string()
+    );
+}
+
+/// Withdrawing a stake (calling `sui_system::request_withdraw_stake`) deletes the StakedSui
+/// object. With two stakes in play, withdrawing one of them should drop only that one from a
+/// `getStakesByIds` response covering both. The remaining stake must still come back. This is
+/// our documented divergence from legacy `sui-json-rpc`, which returned Unstaked for the
+/// withdrawn one.
+#[sim_test]
+async fn test_grpc_get_stakes_by_ids_omits_withdrawn() {
+    let test_cluster = FnDelegationTestCluster::new()
+        .await
+        .expect("Failed to create test cluster");
+
+    let wallet = &test_cluster.onchain_cluster.wallet;
+    let validator_address = test_cluster.get_validator_address().await;
+
+    // Create two stakes.
+    let staking_tx_a = make_staking_transaction(wallet, validator_address).await;
+    let stake_owner = staking_tx_a.data().transaction_data().sender();
+    wallet.execute_transaction_must_succeed(staking_tx_a).await;
+    let staking_tx_b = make_staking_transaction(wallet, validator_address).await;
+    wallet.execute_transaction_must_succeed(staking_tx_b).await;
+
+    test_cluster.wait_for_indexing().await;
+
+    // Pull both stake IDs out of the get_stakes response.
+    let get_stakes_response = test_cluster
+        .execute_jsonrpc(
+            "suix_getStakes".to_string(),
+            json!({ "owner": stake_owner }),
+        )
+        .await
+        .unwrap();
+    let stake_ids: Vec<ObjectID> = get_stakes_response["result"][0]["stakes"]
+        .as_array()
+        .expect("missing stakes array")
+        .iter()
+        .map(|s| {
+            s["stakedSuiId"]
+                .as_str()
+                .expect("missing stakedSuiId")
+                .parse()
+                .expect("malformed stakedSuiId")
+        })
+        .collect();
+    assert_eq!(stake_ids.len(), 2, "expected two stakes, got {stake_ids:?}");
+    let withdrawn_stake_id = stake_ids[0];
+    let kept_stake_id = stake_ids[1];
+
+    // Withdraw the first stake.
+    let stake_ref = test_cluster
+        .onchain_cluster
+        .get_latest_object_ref(&withdrawn_stake_id)
+        .await;
+    let gas_price = wallet.get_reference_gas_price().await.unwrap();
+    let accounts_and_objs = wallet.get_all_accounts_and_gas_objects().await.unwrap();
+    let sender = accounts_and_objs[0].0;
+    let gas_object = accounts_and_objs[0].1[0];
+    let unstake_tx = wallet
+        .sign_transaction(
+            &TestTransactionBuilder::new(sender, gas_object, gas_price)
+                .call_unstaking(stake_ref)
+                .build(),
+        )
+        .await;
+    wallet.execute_transaction_must_succeed(unstake_tx).await;
+
+    test_cluster.wait_for_indexing().await;
+
+    // Query both IDs. The withdrawn stake should be omitted; the kept one should still come
+    // back.
+    let get_by_id_response = test_cluster
+        .execute_jsonrpc(
+            "suix_getStakesByIds".to_string(),
+            json!({ "staked_sui_ids": [withdrawn_stake_id, kept_stake_id] }),
+        )
+        .await
+        .unwrap();
+
+    let returned_ids: Vec<&str> = get_by_id_response["result"]
+        .as_array()
+        .expect("result should be an array")
+        .iter()
+        .flat_map(|delegated| {
+            delegated["stakes"]
+                .as_array()
+                .expect("stakes should be an array")
+                .iter()
+                .map(|s| s["stakedSuiId"].as_str().expect("missing stakedSuiId"))
+        })
+        .collect();
+
+    assert_eq!(
+        returned_ids,
+        vec![kept_stake_id.to_string().as_str()],
+        "expected only the kept stake to be returned, got {get_by_id_response}",
+    );
+
+    // getStakes(owner) should also reflect the withdrawal — only the kept stake remains
+    // listed against this owner.
+    let get_stakes_response = test_cluster
+        .execute_jsonrpc(
+            "suix_getStakes".to_string(),
+            json!({ "owner": stake_owner }),
+        )
+        .await
+        .unwrap();
+    let owner_returned_ids: Vec<&str> = get_stakes_response["result"]
+        .as_array()
+        .expect("result should be an array")
+        .iter()
+        .flat_map(|delegated| {
+            delegated["stakes"]
+                .as_array()
+                .expect("stakes should be an array")
+                .iter()
+                .map(|s| s["stakedSuiId"].as_str().expect("missing stakedSuiId"))
+        })
+        .collect();
+    assert_eq!(
+        owner_returned_ids,
+        vec![kept_stake_id.to_string().as_str()],
+        "expected only the kept stake from getStakes(owner), got {get_stakes_response}",
     );
 }
