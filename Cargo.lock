@@ -15955,6 +15955,7 @@ dependencies = [
  "rand 0.8.5",
  "rustls",
  "serde",
+ "serde_json",
  "sui-default-config",
  "sui-indexer-alt-framework",
  "sui-indexer-alt-framework-store-traits",

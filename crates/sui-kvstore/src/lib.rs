@@ -203,14 +203,31 @@ pub struct ProtocolConfigData {
     pub flags: std::collections::BTreeMap<String, bool>,
 }
 
-/// Serializable watermark for per-pipeline tracking in BigTable.
-/// Mirrors the framework's CommitterWatermark type.
+/// Serializable watermark for per-pipeline tracking in BigTable. BCS-encoded into the `w`
+/// column. The `BigTableConnection` write paths keep this column in sync alongside the new
+/// `w2`+`v` columns (see `WatermarkV2`) so existing readers continue to work.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Watermark {
     pub epoch_hi_inclusive: u64,
     pub checkpoint_hi_inclusive: u64,
     pub tx_hi: u64,
     pub timestamp_ms_hi_inclusive: u64,
+}
+
+/// New serializable watermark for per-pipeline tracking in BigTable. JSON-encoded into the
+/// `w2` column, with an accompanying `v` (version) column used for optimistic-locking CAS writes.
+///
+/// `checkpoint_hi_inclusive` is `Option<u64>` so the post-`init_watermark(None)` state ("pipeline
+/// initialised but no checkpoint observed yet") can be persisted directly.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WatermarkV2 {
+    pub epoch_hi_inclusive: u64,
+    pub checkpoint_hi_inclusive: Option<u64>,
+    pub tx_hi: u64,
+    pub timestamp_ms_hi_inclusive: u64,
+    pub reader_lo: u64,
+    pub pruner_hi: u64,
+    pub pruner_timestamp_ms: u64,
 }
 
 #[async_trait]
@@ -461,17 +478,6 @@ impl BigTableIndexer {
 
     pub fn pipeline_names(&self) -> Vec<&'static str> {
         self.indexer.pipelines().collect()
-    }
-}
-
-impl From<sui_indexer_alt_framework_store_traits::CommitterWatermark> for Watermark {
-    fn from(w: sui_indexer_alt_framework_store_traits::CommitterWatermark) -> Self {
-        Self {
-            epoch_hi_inclusive: w.epoch_hi_inclusive,
-            checkpoint_hi_inclusive: w.checkpoint_hi_inclusive,
-            tx_hi: w.tx_hi,
-            timestamp_ms_hi_inclusive: w.timestamp_ms_hi_inclusive,
-        }
     }
 }
 
