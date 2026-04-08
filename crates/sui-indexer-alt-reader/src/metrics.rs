@@ -319,13 +319,7 @@ where
     }
 
     fn call(&mut self, req: http::Request<ReqBody>) -> Self::Future {
-        // "/sui.rpc.v2.LedgerService/GetCheckpoint" → "GetCheckpoint"
-        let method = req
-            .uri()
-            .path()
-            .rsplit_once('/')
-            .map(|(_, m)| m.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
+        let method = req.uri().path().to_string();
 
         let metrics = self.metrics.clone();
         metrics

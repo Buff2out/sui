@@ -86,18 +86,6 @@ trait GrpcDelegationGovernanceApi {
     async fn get_stakes(&self, owner: SuiAddress) -> RpcResult<Vec<DelegatedStake>>;
 }
 
-#[derive(thiserror::Error, Debug)]
-enum Error {
-    #[error("Failed to load StakedSui objects: {0}")]
-    LoadStakedSui(String),
-
-    #[error("Failed to load rewards: {0}")]
-    LoadRewards(String),
-
-    #[error("Failed to load validator addresses: {0}")]
-    LoadValidatorAddresses(String),
-}
-
 pub(crate) struct Governance(pub Context);
 pub(crate) struct DelegationGovernance(HttpClient);
 pub(crate) struct GrpcDelegationGovernance {
@@ -117,28 +105,19 @@ impl DelegationGovernance {
     }
 }
 
-#[async_trait::async_trait]
-impl GovernanceApiServer for Governance {
-    async fn get_reference_gas_price(&self) -> RpcResult<BigInt<u64>> {
-        Ok(rgp_response(&self.0).await?)
-    }
-
-    async fn get_latest_sui_system_state(&self) -> RpcResult<SuiSystemStateSummary> {
-        Ok(latest_sui_system_state_response(&self.0).await?)
-    }
-}
-
 impl GrpcDelegationGovernance {
     /// Given a list of StakedSui object IDs, load them, fetch rewards and validator addresses,
     /// and return grouped DelegatedStake entries.
-    async fn delegated_stakes(&self, stake_ids: Vec<ObjectID>) -> RpcResult<Vec<DelegatedStake>> {
+    async fn delegated_stakes(
+        &self,
+        stake_ids: Vec<ObjectID>,
+    ) -> Result<Vec<DelegatedStake>, RpcError> {
         let staked_sui_futures = stake_ids
             .iter()
             .map(|id| load_live_deserialized::<StakedSui>(&self.ctx, *id));
         let staked_suis: Vec<StakedSui> = future::try_join_all(staked_sui_futures)
             .await
-            .map_err(|e| Error::LoadStakedSui(e.to_string()))
-            .map_err(|e| RpcError::<Error>::InternalError(anyhow::anyhow!(e)))?;
+            .context("Failed to load StakedSui objects")?;
 
         let reward_keys: Vec<RewardsKey> = staked_suis
             .iter()
@@ -153,14 +132,12 @@ impl GrpcDelegationGovernance {
             .rpc_loader
             .load_many(reward_keys.clone())
             .await
-            .map_err(|e| Error::LoadRewards(e.to_string()))
-            .map_err(|e| RpcError::<Error>::InternalError(anyhow::anyhow!(e)))?;
+            .context("Failed to dry run rewards calculation")?;
         let validator_addresses = self
             .rpc_loader
             .load_many(validator_keys.clone())
             .await
-            .map_err(|e| Error::LoadValidatorAddresses(e.to_string()))
-            .map_err(|e| RpcError::<Error>::InternalError(anyhow::anyhow!(e)))?;
+            .context("Failed to dry run validator address lookup")?;
 
         let mut grouped: std::collections::BTreeMap<(SuiAddress, ObjectID), Vec<Stake>> =
             std::collections::BTreeMap::new();
@@ -207,12 +184,23 @@ impl GrpcDelegationGovernance {
 }
 
 #[async_trait::async_trait]
+impl GovernanceApiServer for Governance {
+    async fn get_reference_gas_price(&self) -> RpcResult<BigInt<u64>> {
+        Ok(rgp_response(&self.0).await?)
+    }
+
+    async fn get_latest_sui_system_state(&self) -> RpcResult<SuiSystemStateSummary> {
+        Ok(latest_sui_system_state_response(&self.0).await?)
+    }
+}
+
+#[async_trait::async_trait]
 impl GrpcDelegationGovernanceApiServer for GrpcDelegationGovernance {
     async fn get_stakes_by_ids(
         &self,
         staked_sui_ids: Vec<ObjectID>,
     ) -> RpcResult<Vec<DelegatedStake>> {
-        self.delegated_stakes(staked_sui_ids).await
+        Ok(self.delegated_stakes(staked_sui_ids).await?)
     }
 
     async fn get_stakes(&self, owner: SuiAddress) -> RpcResult<Vec<DelegatedStake>> {
@@ -249,7 +237,7 @@ impl GrpcDelegationGovernanceApiServer for GrpcDelegationGovernance {
             after_cursor = next_cursor;
         }
 
-        self.delegated_stakes(all_stake_ids).await
+        Ok(self.delegated_stakes(all_stake_ids).await?)
     }
 }
 
