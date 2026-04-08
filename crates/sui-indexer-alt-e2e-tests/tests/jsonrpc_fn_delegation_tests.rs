@@ -24,15 +24,12 @@ struct FnDelegationTestCluster {
     onchain_cluster: TestCluster,
     offchain: OffchainCluster,
     client: Client,
-    /// Checkpoint ingestion directory shared between TestCluster and OffchainCluster.
-    #[allow(unused)]
-    ingestion_dir: tempfile::TempDir,
+    /// Checkpoint ingestion directory shared between TestCluster and OffchainCluster, held to keep
+    /// the temp dir alive for the lifetime of the cluster.
+    _ingestion_dir: tempfile::TempDir,
 }
 
 impl FnDelegationTestCluster {
-    /// Creates a new test cluster with a full indexing stack: Postgres (obj_versions),
-    /// consistent store (owned objects), BigTable (object content), and a gRPC client
-    /// to the fullnode (dry runs). Transaction execution is also enabled via the fullnode proxy.
     async fn new() -> anyhow::Result<Self> {
         let (client_args, ingestion_dir) = local_ingestion_client_args();
 
@@ -69,7 +66,7 @@ impl FnDelegationTestCluster {
             onchain_cluster,
             offchain,
             client: Client::new(),
-            ingestion_dir,
+            _ingestion_dir: ingestion_dir,
         })
     }
 
@@ -148,6 +145,32 @@ impl FnDelegationTestCluster {
             .context("Failed to parse JSON-RPC response")?;
 
         Ok(body)
+    }
+
+    /// Wait for the indexer, consistent store, and BigTable to all catch up to the fullnode's
+    /// latest checkpoint.
+    async fn wait_for_indexing(&self) {
+        let cp = self
+            .onchain_cluster
+            .fullnode_handle
+            .sui_node
+            .state()
+            .get_latest_checkpoint_sequence_number()
+            .unwrap();
+
+        let timeout = Duration::from_secs(60);
+        self.offchain
+            .wait_for_indexer(cp, timeout)
+            .await
+            .expect("Timed out waiting for indexer");
+        self.offchain
+            .wait_for_consistent_store(cp, timeout)
+            .await
+            .expect("Timed out waiting for consistent store");
+        self.offchain
+            .wait_for_bigtable(cp, timeout)
+            .await
+            .expect("Timed out waiting for bigtable");
     }
 }
 
@@ -384,30 +407,7 @@ async fn test_get_stakes_and_by_ids() {
         .execute_transaction_must_succeed(staking_transaction)
         .await;
 
-    let cp = test_cluster
-        .onchain_cluster
-        .fullnode_handle
-        .sui_node
-        .state()
-        .get_latest_checkpoint_sequence_number()
-        .unwrap();
-
-    let timeout = Duration::from_secs(60);
-    test_cluster
-        .offchain
-        .wait_for_indexer(cp, timeout)
-        .await
-        .expect("Timed out waiting for indexer");
-    test_cluster
-        .offchain
-        .wait_for_consistent_store(cp, timeout)
-        .await
-        .expect("Timed out waiting for consistent store");
-    test_cluster
-        .offchain
-        .wait_for_bigtable(cp, timeout)
-        .await
-        .expect("Timed out waiting for bigtable");
+    test_cluster.wait_for_indexing().await;
 
     // Get the stake by owner.
     let get_stakes_response = test_cluster
@@ -505,30 +505,7 @@ async fn test_grpc_get_stakes() {
     let tx_b2 = make_staking_transaction(wallet, validator_b).await;
     wallet.execute_transaction_must_succeed(tx_b2).await;
 
-    let cp = test_cluster
-        .onchain_cluster
-        .fullnode_handle
-        .sui_node
-        .state()
-        .get_latest_checkpoint_sequence_number()
-        .unwrap();
-
-    let timeout = Duration::from_secs(60);
-    test_cluster
-        .offchain
-        .wait_for_indexer(cp, timeout)
-        .await
-        .expect("Timed out waiting for indexer");
-    test_cluster
-        .offchain
-        .wait_for_consistent_store(cp, timeout)
-        .await
-        .expect("Timed out waiting for consistent store");
-    test_cluster
-        .offchain
-        .wait_for_bigtable(cp, timeout)
-        .await
-        .expect("Timed out waiting for bigtable");
+    test_cluster.wait_for_indexing().await;
 
     // Query via the gRPC-backed endpoint.
     let grpc_response = test_cluster
@@ -572,6 +549,47 @@ async fn test_grpc_get_stakes() {
     }
 
     // Compare with the JSON-RPC proxy response — they should match.
+    let jsonrpc_response = test_cluster
+        .execute_jsonrpc(
+            "suix_getStakes".to_string(),
+            json!({ "owner": stake_owner_address }),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(grpc_result, &jsonrpc_response["result"]);
+
+    // Advance one epoch so the stakes reach their activation epoch. Stakes requested in epoch 0
+    // have activation_epoch = 1, so after one reconfiguration current_epoch >= activation_epoch.
+    test_cluster.onchain_cluster.trigger_reconfiguration().await;
+
+    test_cluster.wait_for_indexing().await;
+
+    let grpc_response = test_cluster
+        .execute_jsonrpc(
+            "suix_getStakes".to_string(),
+            json!({ "owner": stake_owner_address }),
+        )
+        .await
+        .unwrap();
+    let grpc_result = &grpc_response["result"];
+
+    // All stakes should now be Active — the network has reached their activation epoch. We don't
+    // assert on `estimatedReward` value because test clusters do not reliably produce non-zero
+    // rewards, but the field must be present (and parseable as a BigInt) to show the reward
+    // computation pipeline ran.
+    for entry in grpc_result.as_array().unwrap() {
+        for stake in entry["stakes"].as_array().unwrap() {
+            assert_eq!(stake["status"], "Active", "stake not active: {stake}");
+            let _reward: u64 = stake["estimatedReward"]
+                .as_str()
+                .expect("estimatedReward should be a BigInt string")
+                .parse()
+                .expect("estimatedReward should parse as u64");
+        }
+    }
+
+    // Active-state response should also match the JSON-RPC proxy.
     let jsonrpc_response = test_cluster
         .execute_jsonrpc(
             "suix_getStakes".to_string(),

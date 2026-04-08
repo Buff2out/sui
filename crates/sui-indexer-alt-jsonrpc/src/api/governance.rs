@@ -138,6 +138,7 @@ impl GrpcDelegationGovernance {
             .load_many(validator_keys.clone())
             .await
             .context("Failed to dry run validator address lookup")?;
+        let current_epoch = latest_epoch(&self.ctx).await?;
 
         let mut grouped: std::collections::BTreeMap<(SuiAddress, ObjectID), Vec<Stake>> =
             std::collections::BTreeMap::new();
@@ -152,7 +153,7 @@ impl GrpcDelegationGovernance {
                 .map(|addr| SuiAddress::from(ObjectID::from(*addr)))
                 .unwrap_or_default();
 
-            let status = if estimated_reward > 0 {
+            let status = if current_epoch >= staked_sui.activation_epoch() {
                 StakeStatus::Active { estimated_reward }
             } else {
                 StakeStatus::Pending
@@ -303,6 +304,24 @@ async fn rgp_response(ctx: &Context) -> Result<BigInt<u64>, RpcError> {
         .context("Failed to fetch the reference gas price")?;
 
     Ok((rgp as u64).into())
+}
+
+/// Fetch the latest indexed epoch from `kv_epoch_starts`.
+async fn latest_epoch(ctx: &Context) -> Result<u64, RpcError> {
+    use kv_epoch_starts::dsl as e;
+
+    let mut conn = ctx
+        .pg_reader()
+        .connect()
+        .await
+        .context("Failed to connect to the database")?;
+
+    let epoch: i64 = conn
+        .first(e::kv_epoch_starts.select(e::epoch).order(e::epoch.desc()))
+        .await
+        .context("Failed to fetch the latest epoch")?;
+
+    Ok(epoch as u64)
 }
 
 /// Load data and generate response for `getLatestSuiSystemState`.
