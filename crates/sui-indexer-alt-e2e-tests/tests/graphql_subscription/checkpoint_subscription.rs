@@ -183,3 +183,133 @@ async fn test_subscription_transactions_pagination_last() {
 
     insta::assert_json_snapshot!("subscription_transactions_pagination_last", item);
 }
+
+// --- Object resolution tests ---
+
+use super::testing::object_wrapping_harness;
+
+#[sim_test]
+async fn test_subscription_object_create() {
+    let mut validator_cluster = TestClusterBuilder::new()
+        .with_num_validators(1)
+        .build()
+        .await;
+    let cluster = SubscriptionTestCluster::new(&validator_cluster).await;
+    let sender = validator_cluster.wallet.active_address().unwrap();
+    let package_id = object_wrapping_harness::publish(&mut validator_cluster).await;
+
+    let query = r#"subscription {
+        checkpoints {
+            sequenceNumber
+            transactions(filter: { sentAddress: "SENDER" }) {
+                nodes {
+                    digest
+                    effects {
+                        objectChanges {
+                            nodes {
+                                inputState {
+                                    address
+                                    version
+                                    digest
+                                    asMoveObject {
+                                        contents { type { repr } }
+                                    }
+                                }
+                                outputState {
+                                    address
+                                    version
+                                    digest
+                                    asMoveObject {
+                                        contents { type { repr } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }"#
+    .replace("SENDER", &sender.to_string());
+    let mut stream = cluster.subscribe(&query).await;
+
+    let (digest, _) =
+        object_wrapping_harness::create_item(&mut validator_cluster, package_id, 42).await;
+    let item = stream
+        .wait_for_matching_item(&[digest], checkpoint_tx_digests)
+        .await;
+
+    insta::assert_json_snapshot!("subscription_object_create", item);
+}
+
+#[sim_test]
+async fn test_subscription_object_lifecycle() {
+    let mut validator_cluster = TestClusterBuilder::new()
+        .with_num_validators(1)
+        .build()
+        .await;
+    let cluster = SubscriptionTestCluster::new(&validator_cluster).await;
+    let sender = validator_cluster.wallet.active_address().unwrap();
+    let package_id = object_wrapping_harness::publish(&mut validator_cluster).await;
+
+    let query = r#"subscription {
+        checkpoints {
+            sequenceNumber
+            transactions(filter: { sentAddress: "SENDER" }) {
+                nodes {
+                    digest
+                    effects {
+                        objectChanges {
+                            nodes {
+                                inputState {
+                                    address
+                                    version
+                                    digest
+                                    asMoveObject {
+                                        contents { type { repr } }
+                                    }
+                                }
+                                outputState {
+                                    address
+                                    version
+                                    digest
+                                    asMoveObject {
+                                        contents { type { repr } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }"#
+    .replace("SENDER", &sender.to_string());
+    let mut stream = cluster.subscribe(&query).await;
+
+    let (d1, item) =
+        object_wrapping_harness::create_item(&mut validator_cluster, package_id, 42).await;
+    let cp1 = stream
+        .wait_for_matching_item(&[d1], checkpoint_tx_digests)
+        .await;
+
+    let (d2, item) =
+        object_wrapping_harness::update_item(&mut validator_cluster, package_id, item, 100).await;
+    let cp2 = stream
+        .wait_for_matching_item(&[d2], checkpoint_tx_digests)
+        .await;
+
+    let (d3, wrapper) =
+        object_wrapping_harness::wrap_item(&mut validator_cluster, package_id, item).await;
+    let cp3 = stream
+        .wait_for_matching_item(&[d3], checkpoint_tx_digests)
+        .await;
+
+    let (d4, _) =
+        object_wrapping_harness::unwrap_wrapper(&mut validator_cluster, package_id, wrapper).await;
+    let cp4 = stream
+        .wait_for_matching_item(&[d4], checkpoint_tx_digests)
+        .await;
+
+    insta::assert_json_snapshot!("subscription_object_lifecycle", [cp1, cp2, cp3, cp4]);
+}
