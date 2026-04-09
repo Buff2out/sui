@@ -15140,6 +15140,8 @@ dependencies = [
  "bin-version",
  "forking-data-store",
  "serde",
+ "simulacrum",
+ "sui-config",
  "sui-types",
  "tempfile",
  "tokio",

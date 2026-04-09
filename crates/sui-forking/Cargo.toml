@@ -16,6 +16,8 @@ url.workspace = true
 bcs.workspace = true
 bin-version.workspace = true
 forking-data-store = { path = "../forking-data-store" }
+simulacrum = { path = "../simulacrum" }
+sui-config.workspace = true
 sui-types.workspace = true
 
 [dev-dependencies]
