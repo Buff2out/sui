@@ -193,13 +193,7 @@ impl DataStore {
     pub fn get_highest_checkpoint_sequence_number(
         &self,
     ) -> anyhow::Result<CheckpointSequenceNumber> {
-        self.local.get_highest_checkpoint()
-    }
-
-    /// Return the highest checkpoint sequence number known to the local filesystem cache.
-    /// Errors if the checkpoints directory does not exist (e.g. nothing has been persisted yet).
-    pub fn get_highest_checkpoint(&self) -> anyhow::Result<CheckpointSequenceNumber> {
-        self.local.get_highest_checkpoint()
+        self.local.get_highest_checkpoint_sequence_number()
     }
 }
 
@@ -307,7 +301,7 @@ impl SimulatorStore for DataStore {
     }
 
     fn get_highest_checkpint(&self) -> Option<VerifiedCheckpoint> {
-        self.get_highest_checkpoint();
+        todo!()
     }
 
     fn get_checkpoint_contents(
