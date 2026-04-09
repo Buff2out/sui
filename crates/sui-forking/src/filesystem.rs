@@ -23,6 +23,7 @@ use anyhow::bail;
 use forking_data_store::Node;
 use sui_types::base_types::ObjectID;
 use sui_types::messages_checkpoint::CheckpointSequenceNumber;
+use sui_types::messages_checkpoint::VerifiedCheckpoint;
 use sui_types::object::Object;
 
 /// Directory name appended to the configured filesystem store root.
@@ -121,7 +122,24 @@ impl FilesystemStore {
     }
 
     /// Get the highest checkpoint sequence number available on disk.
-    pub(crate) fn get_highest_checkpoint(&self) -> anyhow::Result<CheckpointSequenceNumber> {
+    pub(crate) fn get_highest_checkpoint(&self) -> anyhow::Result<VerifiedCheckpoint> {
+        let checkpoint_dir = self.checkpoints_dir();
+
+        anyhow::ensure!(
+            checkpoint_dir.exists(),
+            "Checkpoint directory does not exist: {}",
+            checkpoint_dir.display()
+        );
+
+        let latest = self.read_latest_file(&checkpoint_dir)?;
+        let checkpoint_file = checkpoint_dir.join(latest.to_string());
+        self.read_bcs_file(&checkpoint_file)
+    }
+
+    /// Get the highest checkpoint sequence number available on disk.
+    pub(crate) fn get_highest_checkpoint_sequence_number(
+        &self,
+    ) -> anyhow::Result<CheckpointSequenceNumber> {
         let checkpoint_dir = self.checkpoints_dir();
 
         anyhow::ensure!(
