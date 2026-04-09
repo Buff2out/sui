@@ -10,14 +10,18 @@ edition = "2024"
 anyhow.workspace = true
 serde.workspace = true
 tokio = { workspace = true, features = ["full"] }
+tracing.workspace = true
 tracing-subscriber.workspace = true
 url.workspace = true
 
 bcs.workspace = true
 bin-version.workspace = true
 forking-data-store = { path = "../forking-data-store" }
+rand.workspace = true
 simulacrum = { path = "../simulacrum" }
 sui-config.workspace = true
+sui-protocol-config.workspace = true
+sui-swarm-config.workspace = true
 sui-types.workspace = true
 
 [dev-dependencies]
