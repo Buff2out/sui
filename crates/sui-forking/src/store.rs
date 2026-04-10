@@ -484,7 +484,11 @@ mod execution_tests {
         let initial_ts = SimulatorStore::get_clock(sim.store()).timestamp_ms;
 
         let effects = sim.advance_clock(Duration::from_secs(60));
-        assert!(effects.status().is_ok(), "execution failed: {:?}", effects.status());
+        assert!(
+            effects.status().is_ok(),
+            "execution failed: {:?}",
+            effects.status()
+        );
 
         assert_eq!(
             SimulatorStore::get_clock(sim.store()).timestamp_ms,
