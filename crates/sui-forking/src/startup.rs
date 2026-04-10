@@ -84,7 +84,7 @@ pub async fn initialize(
 
 /// Run the forked network: spin up the gRPC `TransactionExecutionService` and wait for shutdown.
 ///
-/// Builds an [`RpcService`] backed by `context`, registers the
+/// Builds an internal `RpcService` backed by `context`, registers the
 /// [`ForkingTransactionExecutionService`] on it, and serves it until the underlying
 /// `sui_futures::service::Service` exits (either on its own, on Ctrl+C, or on a fatal task error).
 pub async fn run(context: Context, rpc_args: RpcArgs, version: &'static str) -> Result<()> {

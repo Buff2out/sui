@@ -4,12 +4,13 @@
 //! Shared transaction execution logic for the forking gRPC services.
 
 use sui_rpc_api::RpcError;
-use sui_types::{
-    base_types::ObjectID,
-    effects::{TransactionEffects, TransactionEffectsAPI},
-    error::ExecutionError,
-    transaction::{InputObjectKind, TransactionData, TransactionDataAPI},
-};
+use sui_types::base_types::ObjectID;
+use sui_types::effects::TransactionEffects;
+use sui_types::effects::TransactionEffectsAPI;
+use sui_types::error::ExecutionError;
+use sui_types::transaction::InputObjectKind;
+use sui_types::transaction::TransactionData;
+use sui_types::transaction::TransactionDataAPI;
 use tracing::info;
 
 use crate::context::Context;
@@ -20,9 +21,8 @@ pub struct ExecutionResult {
     pub _execution_error: Option<ExecutionError>,
 }
 
-/// Execute a transaction and commit it to the store.
-///
-/// This is the core execution logic shared by both JSON-RPC and gRPC services.
+/// Execute a transaction and commit it to the store. This will fetch and cache all input objects
+/// before execution to ensure the Simulacrum has all necessary data to execute the transaction.
 pub async fn execute_transaction(
     context: &Context,
     tx_data: TransactionData,

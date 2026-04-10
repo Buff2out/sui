@@ -1,12 +1,13 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{convert::Infallible, str::FromStr, sync::Arc};
+use std::convert::Infallible;
+use std::str::FromStr;
+use std::sync::Arc;
 
-use tonic::{
-    Status,
-    metadata::{MetadataMap, MetadataValue},
-};
+use tonic::Status;
+use tonic::metadata::MetadataMap;
+use tonic::metadata::MetadataValue;
 
 pub(super) trait StatusCode {
     fn code(&self) -> tonic::Code;
