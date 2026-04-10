@@ -218,11 +218,6 @@ pub async fn transfer_coins(
 pub fn checkpoint_tx_digests(item: &Value) -> Vec<&str> {
     item["data"]["checkpoints"]["transactions"]["nodes"]
         .as_array()
-        .map(|nodes| {
-            nodes
-                .iter()
-                .filter_map(|n| n["digest"].as_str())
-                .collect()
-        })
+        .map(|nodes| nodes.iter().filter_map(|n| n["digest"].as_str()).collect())
         .unwrap_or_default()
 }
