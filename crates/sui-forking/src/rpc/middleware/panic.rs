@@ -17,7 +17,7 @@ use tonic::Status;
 use tower::Layer;
 use tower::Service;
 
-use crate::grpc::metrics::RpcMetrics;
+use crate::rpc::metrics::RpcMetrics;
 
 /// Tower layer that catches panics during request processing and converts them to gRPC
 /// `Status::internal()` errors.

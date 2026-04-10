@@ -19,9 +19,9 @@ use sui_types::messages_checkpoint::CheckpointSequenceNumber;
 use sui_types::sui_system_state::{SuiSystemState, SuiSystemStateTrait};
 
 use crate::context::Context;
-use crate::grpc::RpcArgs;
-use crate::grpc::RpcService;
-use crate::grpc::transaction_execution_service::ForkingTransactionExecutionService;
+use crate::rpc::RpcArgs;
+use crate::rpc::RpcService;
+use crate::rpc::transaction_execution_service::ForkingTransactionExecutionService;
 use crate::store::DataStore;
 
 /// Initialize a forked network by fetching state from the remote endpoint at
@@ -91,12 +91,12 @@ pub async fn run(context: Context, rpc_args: RpcArgs, version: &'static str) -> 
     let registry = Registry::new();
 
     let tx_execution_service = ForkingTransactionExecutionService::new(context);
-    let grpc = RpcService::new(rpc_args, version, &registry)
+    let rpc = RpcService::new(rpc_args, version, &registry)
         .await?
         .register_encoded_file_descriptor_set(sui_rpc::proto::sui::rpc::v2::FILE_DESCRIPTOR_SET)
         .add_service(TransactionExecutionServiceServer::new(tx_execution_service));
 
-    let service = grpc.run().await?;
+    let service = rpc.run().await?;
 
     info!("forked network running, waiting for shutdown signal (Ctrl+C)");
     service

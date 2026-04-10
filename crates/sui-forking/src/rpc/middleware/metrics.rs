@@ -14,7 +14,7 @@ use tonic::metadata::GRPC_CONTENT_TYPE;
 use mysten_network::callback::MakeCallbackHandler;
 use mysten_network::callback::ResponseHandler;
 
-use crate::grpc::metrics::RpcMetrics;
+use crate::rpc::metrics::RpcMetrics;
 
 #[derive(Clone)]
 pub struct MakeMetricsHandler {

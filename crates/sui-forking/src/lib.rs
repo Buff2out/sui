@@ -6,6 +6,6 @@
 pub mod context;
 pub mod execution;
 pub mod filesystem;
-pub mod grpc;
+pub mod rpc;
 pub mod startup;
 pub mod store;
