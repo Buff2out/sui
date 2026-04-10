@@ -313,3 +313,109 @@ async fn test_subscription_object_lifecycle() {
 
     insta::assert_json_snapshot!("subscription_object_lifecycle", [cp1, cp2, cp3, cp4]);
 }
+
+/// Tests that `contents.json` resolves for streamed objects when a database
+/// with indexed packages is available for type layout resolution.
+/// Uses #[tokio::test] because sim_test intercepts TCP, preventing Postgres access.
+#[tokio::test]
+async fn test_subscription_object_json() {
+    use prometheus::Registry;
+    use sui_pg_db::DbArgs;
+
+    let ingestion_dir = tempfile::tempdir().unwrap();
+    let mut validator_cluster = TestClusterBuilder::new()
+        .with_num_validators(1)
+        .with_data_ingestion_dir(ingestion_dir.path().to_owned())
+        .build()
+        .await;
+
+    let db = sui_pg_db::temp::TempDb::new().expect("Failed to create TempDb");
+    let database_url = db.database().url().clone();
+    let writer = sui_pg_db::Db::for_write(database_url.clone(), DbArgs::default())
+        .await
+        .unwrap();
+    writer.run_migrations(None).await.unwrap();
+
+    let indexer = sui_indexer_alt::setup_indexer(
+        database_url.clone(),
+        DbArgs::default(),
+        sui_indexer_alt_framework::IndexerArgs::default(),
+        sui_indexer_alt_framework::ingestion::ClientArgs {
+            ingestion:
+                sui_indexer_alt_framework::ingestion::ingestion_client::IngestionClientArgs {
+                    local_ingestion_path: Some(ingestion_dir.path().to_owned()),
+                    ..Default::default()
+                },
+            ..Default::default()
+        },
+        sui_indexer_alt::config::IndexerConfig::for_test(),
+        None,
+        &Registry::new(),
+    )
+    .await
+    .expect("Failed to create indexer");
+
+    let _indexer = indexer.run().await.expect("Failed to start indexer");
+    wait_for_kv_packages(&db, 0).await;
+
+    let cluster =
+        SubscriptionTestCluster::new_with_db(&validator_cluster, database_url.clone()).await;
+    let sender = validator_cluster.wallet.active_address().unwrap();
+    let package_id = object_wrapping_harness::publish(&mut validator_cluster).await;
+
+    // Wait for the published package to be indexed.
+    let resp = validator_cluster
+        .wallet
+        .get_reference_gas_price()
+        .await
+        .unwrap();
+    // Find the latest checkpoint to wait for.
+    wait_for_kv_packages(&db, 0).await;
+
+    let query = r#"subscription {
+        checkpoints {
+            transactions(filter: { sentAddress: "SENDER" }) {
+                nodes {
+                    digest
+                    effects {
+                        objectChanges {
+                            nodes {
+                                outputState {
+                                    asMoveObject {
+                                        contents {
+                                            type { repr }
+                                            json
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }"#
+    .replace("SENDER", &sender.to_string());
+    let mut stream = cluster.subscribe(&query).await;
+
+    let (digest, _) =
+        object_wrapping_harness::create_item(&mut validator_cluster, package_id, 42).await;
+    let checkpoint = stream
+        .wait_for_matching_item(&[digest], checkpoint_tx_digests)
+        .await;
+
+    insta::assert_json_snapshot!("subscription_object_json", checkpoint, {
+        ".**.objectChanges.nodes" => insta::sorted_redaction(),
+        ".**.digest" => "[digest]",
+        ".**.type.repr" => insta::dynamic_redaction(|value, _path| {
+            let s = value.as_str().unwrap();
+            if let Some(idx) = s.find("::") {
+                insta::internals::Content::from(format!("[pkg]{}", &s[idx..]))
+            } else {
+                insta::internals::Content::from(s.to_string())
+            }
+        }),
+        ".**.json.id" => "[id]",
+        ".**.json.balance" => "[balance]",
+    });
+}
