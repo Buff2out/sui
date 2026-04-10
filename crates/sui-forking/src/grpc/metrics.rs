@@ -26,7 +26,7 @@ impl RpcMetrics {
     pub(crate) fn new(registry: &Registry) -> Self {
         Self {
             request_latency: register_histogram_vec_with_registry!(
-                "consistent_rpc_request_latency",
+                "forking_grpc_request_latency",
                 "Time taken to response to gRPC requests, by path",
                 &["path"],
                 LATENCY_SEC_BUCKETS.to_vec(),
@@ -35,7 +35,7 @@ impl RpcMetrics {
             .unwrap(),
 
             requests_received: register_int_counter_vec_with_registry!(
-                "consistent_rpc_requests_received",
+                "forking_grpc_requests_received",
                 "Number of requests initiated for each gRPC method",
                 &["path"],
                 registry,
@@ -43,7 +43,7 @@ impl RpcMetrics {
             .unwrap(),
 
             requests_succeeded: register_int_counter_vec_with_registry!(
-                "consistent_rpc_requests_succeeded",
+                "forking_grpc_requests_succeeded",
                 "Number of requests that completed successfully, by path",
                 &["path", "code"],
                 registry,
@@ -51,7 +51,7 @@ impl RpcMetrics {
             .unwrap(),
 
             requests_failed: register_int_counter_vec_with_registry!(
-                "consistent_rpc_requests_failed",
+                "forking_grpc_requests_failed",
                 "Number of requests that completed with an error, by path",
                 &["path", "code"],
                 registry,
@@ -59,7 +59,7 @@ impl RpcMetrics {
             .unwrap(),
 
             requests_cancelled: register_int_counter_vec_with_registry!(
-                "consistent_rpc_requests_cancelled",
+                "forking_grpc_requests_cancelled",
                 "Number of requests that were cancelled before completion, by path",
                 &["path"],
                 registry,
@@ -67,7 +67,7 @@ impl RpcMetrics {
             .unwrap(),
 
             requests_panicked: register_int_counter_with_registry!(
-                "consistent_rpc_requests_panicked",
+                "forking_grpc_requests_panicked",
                 "Number of requests that panicked during processing",
                 registry,
             )

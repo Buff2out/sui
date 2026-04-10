@@ -99,7 +99,7 @@ async fn fetch_and_cache_object_from_rpc(
 ) -> Result<(), anyhow::Error> {
     let simulacrum = context.simulacrum.read().await;
     let data_store = simulacrum.store();
-    let obj = sui_types::storage::ObjectStore::get_object(data_store, object_id);
+    let obj = data_store.get_object(object_id).ok().flatten();
     obj.ok_or_else(|| anyhow::anyhow!("Object {} not found in store during execution", object_id))?;
 
     Ok(())

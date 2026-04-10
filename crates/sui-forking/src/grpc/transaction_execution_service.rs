@@ -13,7 +13,7 @@ use sui_rpc::proto::sui::rpc::v2::{
     transaction_execution_service_server::TransactionExecutionService,
 };
 use sui_rpc_api::{ErrorReason, RpcError};
-use sui_types::base_types::{ObjectID, ObjectType, SequenceNumber};
+use sui_types::base_types::{ObjectID, ObjectType};
 use sui_types::effects::TransactionEffectsAPI;
 use sui_types::object::Object;
 use sui_types::transaction::TransactionData;
@@ -21,7 +21,6 @@ use tap::Pipe;
 
 use crate::context::Context;
 use crate::execution;
-use crate::store::DataStore;
 
 const EXECUTE_TRANSACTION_READ_MASK_DEFAULT: &str = "effects";
 
@@ -55,7 +54,7 @@ impl TransactionExecutionService for ForkingTransactionExecutionService {
         _request: tonic::Request<SimulateTransactionRequest>,
     ) -> Result<tonic::Response<SimulateTransactionResponse>, tonic::Status> {
         Err(tonic::Status::unimplemented(
-            "simulate_transaction is not yet supported by forking-data-store",
+            "simulate_transaction is not yet supported",
         ))
     }
 }
@@ -152,13 +151,12 @@ async fn execute_transaction_impl(
             let sim = context.simulacrum.read().await;
             let store = sim.store();
             annotate_effects_object_types(&mut effects_message, |object_id, version| {
-                <DataStore as SimulatorStore>::get_object_at_version(
-                    store,
-                    &object_id,
-                    SequenceNumber::from_u64(version),
-                )
-                .as_ref()
-                .map(object_type_to_string_from_object)
+                store
+                    .get_object_at_version(&object_id, version)
+                    .ok()
+                    .flatten()
+                    .as_ref()
+                    .map(object_type_to_string_from_object)
             });
         }
 
@@ -168,10 +166,10 @@ async fn execute_transaction_impl(
     // Get events if requested
     if let Some(submask) = read_mask.subtree(ExecutedTransaction::EVENTS_FIELD.name) {
         let sim = context.simulacrum.read().await;
-        if let Some(events) = <DataStore as SimulatorStore>::get_transaction_events(
-            sim.store(),
-            effects.transaction_digest(),
-        ) {
+        if let Some(events) = sim
+            .store()
+            .get_transaction_events(effects.transaction_digest())
+        {
             let events_sdk: sui_sdk_types::TransactionEvents = events.try_into().map_err(|e| {
                 RpcError::new(
                     tonic::Code::Internal,

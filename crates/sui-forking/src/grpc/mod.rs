@@ -199,7 +199,7 @@ impl<'d> RpcService<'d> {
 
         // Start HTTPS server if TLS is configured
         if let (Some(listen_address), Some(config)) = (rpc_tls_listen_address, tls_config) {
-            info!("Starting Consistent RPC TLS service on {listen_address}");
+            info!("Starting forking gRPC TLS service on {listen_address}");
             let handle = Handle::new();
             let tls_router = router.clone();
 
@@ -215,16 +215,16 @@ impl<'d> RpcService<'d> {
                         .handle(handle)
                         .serve(tls_router.into_make_service())
                         .await
-                        .context("Consistent RPC TLS service failed")?;
+                        .context("forking gRPC TLS service failed")?;
                     Ok(())
                 });
         }
 
         // Start HTTP server
-        info!("Starting Consistent RPC service on {rpc_listen_address}");
+        info!("Starting forking gRPC service on {rpc_listen_address}");
         let listener = TcpListener::bind(rpc_listen_address)
             .await
-            .context("Failed to bind Consistent RPC to listen address")?;
+            .context("Failed to bind forking gRPC to listen address")?;
 
         let (stx, srx) = oneshot::channel::<()>();
         service = service
@@ -237,7 +237,7 @@ impl<'d> RpcService<'d> {
                         let _ = srx.await;
                     })
                     .await
-                    .context("Consistent RPC HTTP service failed")
+                    .context("forking gRPC HTTP service failed")
             });
 
         Ok(service)

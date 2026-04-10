@@ -12,6 +12,7 @@ use sui_protocol_config::Chain;
 use crate::store::DataStore;
 
 /// Shared context for the forked network, holding the simulacrum instance and metadata.
+#[derive(Clone)]
 pub struct Context {
     pub(crate) simulacrum: Arc<RwLock<Simulacrum<OsRng, DataStore>>>,
     chain_identifier: Chain,
