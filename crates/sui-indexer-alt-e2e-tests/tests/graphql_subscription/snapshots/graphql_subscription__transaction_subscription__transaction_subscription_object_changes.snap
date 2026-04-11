@@ -1,0 +1,58 @@
+---
+source: crates/sui-indexer-alt-e2e-tests/tests/graphql_subscription/transaction_subscription.rs
+expression: item
+---
+{
+  "data": {
+    "transactions": {
+      "digest": "AmNbYdVGdrxFB8syoJQA7tiqhp3492uTMSAmAHCLrL1P",
+      "effects": {
+        "objectChanges": {
+          "nodes": [
+            {
+              "inputState": {
+                "address": "0x08287e1370488d859a0d38fc8f3637b8ad90edc3c2c7f1fe7e400dc8edf4e9cb",
+                "version": 1,
+                "digest": "2HjHrMh8S1RV6xAKdmXb57Ms86MizTkdot65F2FJ9MGD",
+                "asMoveObject": {
+                  "contents": {
+                    "type": {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI>"
+                    }
+                  }
+                }
+              },
+              "outputState": {
+                "address": "0x08287e1370488d859a0d38fc8f3637b8ad90edc3c2c7f1fe7e400dc8edf4e9cb",
+                "version": 2,
+                "digest": "J9JYtcMR43ESjcqE8T89k8yLWrNk9BEQ7zuqzAe9w5sW",
+                "asMoveObject": {
+                  "contents": {
+                    "type": {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI>"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "inputState": null,
+              "outputState": {
+                "address": "0x4490732bd1161e713ab1c8a1bc17138bee8d5ecbd29fc34e5b5ca2ae18536df7",
+                "version": 2,
+                "digest": "9PMLMCDZqQpM9eEdttDd4vgkXvULnQRG9pzmuTntDFb5",
+                "asMoveObject": {
+                  "contents": {
+                    "type": {
+                      "repr": "0x636a27f7eded7176efe955e2f5d9072ddd4c9c9f590c63c86007996b82c484ca::wrapping::Item"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

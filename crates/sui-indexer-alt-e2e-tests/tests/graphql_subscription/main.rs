@@ -4,3 +4,4 @@
 mod testing;
 
 mod checkpoint_subscription;
+mod transaction_subscription;

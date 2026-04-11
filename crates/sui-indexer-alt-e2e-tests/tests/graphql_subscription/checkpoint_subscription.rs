@@ -363,13 +363,6 @@ async fn test_subscription_object_json() {
     let sender = validator_cluster.wallet.active_address().unwrap();
     let package_id = object_wrapping_harness::publish(&mut validator_cluster).await;
 
-    // Wait for the published package to be indexed.
-    let resp = validator_cluster
-        .wallet
-        .get_reference_gas_price()
-        .await
-        .unwrap();
-    // Find the latest checkpoint to wait for.
     wait_for_kv_packages(&db, 0).await;
 
     let query = r#"subscription {
