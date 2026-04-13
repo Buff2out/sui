@@ -484,6 +484,38 @@ mod tests {
     }
 
     #[test]
+    fn test_signed_type_tag_parse_roundtrip() {
+        for (s, tag) in [
+            ("i8", TypeTag::I8),
+            ("i16", TypeTag::I16),
+            ("i32", TypeTag::I32),
+            ("i64", TypeTag::I64),
+            ("i128", TypeTag::I128),
+            ("i256", TypeTag::I256),
+        ] {
+            let parsed: TypeTag = s.parse().unwrap();
+            assert_eq!(parsed, tag);
+            assert_eq!(tag.to_string(), s);
+        }
+    }
+
+    #[test]
+    fn test_signed_type_tag_serde() {
+        for tag in [
+            TypeTag::I8,
+            TypeTag::I16,
+            TypeTag::I32,
+            TypeTag::I64,
+            TypeTag::I128,
+            TypeTag::I256,
+        ] {
+            let json = serde_json::to_string(&tag).unwrap();
+            let back: TypeTag = serde_json::from_str(&json).unwrap();
+            assert_eq!(tag, back);
+        }
+    }
+
+    #[test]
     fn test_module_id_display() {
         let id = ModuleId::new(AccountAddress::ONE, ident_str!("foo").to_owned());
 

@@ -377,6 +377,7 @@ impl Display for TypeInput {
 #[cfg(test)]
 mod test {
     use super::TypeInput;
+    use move_core_types::language_storage::TypeTag;
     use sui_enum_compat_util::*;
 
     #[test]
@@ -384,5 +385,27 @@ mod test {
         let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         path.extend(["tests", "staged", "type_input.yaml"]);
         check_enum_compat_order::<TypeInput>(path);
+    }
+
+    #[test]
+    fn signed_type_input_type_tag_roundtrip() {
+        for (input, expected) in [
+            (TypeInput::I8, TypeTag::I8),
+            (TypeInput::I16, TypeTag::I16),
+            (TypeInput::I32, TypeTag::I32),
+            (TypeInput::I64, TypeTag::I64),
+            (TypeInput::I128, TypeTag::I128),
+            (TypeInput::I256, TypeTag::I256),
+        ] {
+            assert_eq!(input.to_type_tag().unwrap(), expected);
+            assert_eq!(TypeInput::from(expected), input);
+        }
+    }
+
+    #[test]
+    fn signed_type_input_canonical_display() {
+        assert_eq!(TypeInput::I8.to_canonical_string(false), "i8");
+        assert_eq!(TypeInput::I64.to_canonical_string(true), "i64");
+        assert_eq!(TypeInput::I256.to_canonical_string(false), "i256");
     }
 }
