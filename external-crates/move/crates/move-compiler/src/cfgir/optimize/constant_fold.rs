@@ -441,6 +441,17 @@ macro_rules! cast_u {
             V::U64(u) => V::$target_v(<$target_ty>::try_from(u).ok()?),
             V::U128(u) => V::$target_v(<$target_ty>::try_from(u).ok()?),
             V::U256(u) => V::$target_v(<$target_ty>::try_from(u).ok()?),
+            // signed → unsigned: stdlib provides try_from for i8..i128 → uN
+            V::I8(v) => V::$target_v(<$target_ty>::try_from(v).ok()?),
+            V::I16(v) => V::$target_v(<$target_ty>::try_from(v).ok()?),
+            V::I32(v) => V::$target_v(<$target_ty>::try_from(v).ok()?),
+            V::I64(v) => V::$target_v(<$target_ty>::try_from(v).ok()?),
+            V::I128(v) => V::$target_v(<$target_ty>::try_from(v).ok()?),
+            // I256 → uN: narrow to i128 first, then to target
+            V::I256(v) => {
+                let v = i128::try_from(v).ok()?;
+                V::$target_v(<$target_ty>::try_from(v).ok()?)
+            }
             _ => return None,
         }
     };
@@ -455,6 +466,17 @@ macro_rules! cast_i {
             V::I64(v) => V::$target_v(<$target_ty>::try_from(v).ok()?),
             V::I128(v) => V::$target_v(<$target_ty>::try_from(v).ok()?),
             V::I256(v) => V::$target_v(<$target_ty>::try_from(v).ok()?),
+            // unsigned → signed: stdlib provides try_from for u8..u128 → iN
+            V::U8(u) => V::$target_v(<$target_ty>::try_from(u).ok()?),
+            V::U16(u) => V::$target_v(<$target_ty>::try_from(u).ok()?),
+            V::U32(u) => V::$target_v(<$target_ty>::try_from(u).ok()?),
+            V::U64(u) => V::$target_v(<$target_ty>::try_from(u).ok()?),
+            V::U128(u) => V::$target_v(<$target_ty>::try_from(u).ok()?),
+            // U256 → iN: narrow to u128 first, then to target
+            V::U256(u) => {
+                let u = u128::try_from(u).ok()?;
+                V::$target_v(<$target_ty>::try_from(u).ok()?)
+            }
             _ => return None,
         }
     };
@@ -463,6 +485,8 @@ macro_rules! cast_i {
 fn fold_cast(loc: Loc, sp!(_, bt_): &BuiltinTypeName, v: Value_) -> Option<UnannotatedExp_> {
     use BuiltinTypeName_ as BT;
     use Value_ as V;
+    use move_core_types::i256::I256;
+    use move_core_types::u256::U256;
     let cast = match bt_ {
         BT::U8 => cast_u!(v, U8, u8),
         BT::U16 => cast_u!(v, U16, u16),
@@ -476,6 +500,13 @@ fn fold_cast(loc: Loc, sp!(_, bt_): &BuiltinTypeName, v: Value_) -> Option<Unann
             V::U64(u) => V::U256(u.into()),
             V::U128(u) => V::U256(u.into()),
             V::U256(u) => V::U256(u),
+            // signed → U256
+            V::I8(v) => V::U256(U256::try_from(v).ok()?),
+            V::I16(v) => V::U256(U256::try_from(v).ok()?),
+            V::I32(v) => V::U256(U256::try_from(v).ok()?),
+            V::I64(v) => V::U256(U256::try_from(v).ok()?),
+            V::I128(v) => V::U256(U256::try_from(v).ok()?),
+            V::I256(v) => V::U256(U256::try_from(v).ok()?),
             _ => return None,
         },
         BT::I8 => cast_i!(v, I8, i8),
@@ -483,18 +514,22 @@ fn fold_cast(loc: Loc, sp!(_, bt_): &BuiltinTypeName, v: Value_) -> Option<Unann
         BT::I32 => cast_i!(v, I32, i32),
         BT::I64 => cast_i!(v, I64, i64),
         BT::I128 => cast_i!(v, I128, i128),
-        BT::I256 => {
-            use move_core_types::i256::I256;
-            match v {
-                V::I8(v) => V::I256(I256::from(v)),
-                V::I16(v) => V::I256(I256::from(v)),
-                V::I32(v) => V::I256(I256::from(v)),
-                V::I64(v) => V::I256(I256::from(v)),
-                V::I128(v) => V::I256(I256::from(v)),
-                V::I256(v) => V::I256(v),
-                _ => return None,
-            }
-        }
+        BT::I256 => match v {
+            V::I8(v) => V::I256(I256::from(v)),
+            V::I16(v) => V::I256(I256::from(v)),
+            V::I32(v) => V::I256(I256::from(v)),
+            V::I64(v) => V::I256(I256::from(v)),
+            V::I128(v) => V::I256(I256::from(v)),
+            V::I256(v) => V::I256(v),
+            // unsigned → I256
+            V::U8(u) => V::I256(I256::from(u)),
+            V::U16(u) => V::I256(I256::from(u)),
+            V::U32(u) => V::I256(I256::from(u)),
+            V::U64(u) => V::I256(I256::from(u)),
+            V::U128(u) => V::I256(I256::from(u)),
+            V::U256(u) => V::I256(I256::try_from(u).ok()?),
+            _ => return None,
+        },
         _ => panic!("ICE unexpected cast target while folding: {:?}", bt_),
     };
     Some(evalue_(loc, cast))

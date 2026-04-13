@@ -51,6 +51,9 @@ pub enum I256CastErrorKind {
 
     /// Value does not fit in i128.
     OutOfRangeForI128,
+
+    /// Value does not fit in i256.
+    OutOfRangeForI256,
 }
 
 /// Error returned when a cast from I256 to a narrower signed type fails.
@@ -76,6 +79,7 @@ impl fmt::Display for I256CastError {
             I256CastErrorKind::OutOfRangeForI32 => "i32",
             I256CastErrorKind::OutOfRangeForI64 => "i64",
             I256CastErrorKind::OutOfRangeForI128 => "i128",
+            I256CastErrorKind::OutOfRangeForI256 => "i256",
         };
         write!(
             f,
@@ -506,6 +510,55 @@ impl TryFrom<I256> for i128 {
             Ok(n.0.as_i128())
         } else {
             Err(I256CastError::new(n, I256CastErrorKind::OutOfRangeForI128))
+        }
+    }
+}
+
+// Cross-signedness: unsigned → I256
+
+impl From<u8> for I256 {
+    fn from(n: u8) -> Self {
+        Self(ethnum::I256::from(n as i128))
+    }
+}
+
+impl From<u16> for I256 {
+    fn from(n: u16) -> Self {
+        Self(ethnum::I256::from(n as i128))
+    }
+}
+
+impl From<u32> for I256 {
+    fn from(n: u32) -> Self {
+        Self(ethnum::I256::from(n as i128))
+    }
+}
+
+impl From<u64> for I256 {
+    fn from(n: u64) -> Self {
+        Self(ethnum::I256::from(n as i128))
+    }
+}
+
+impl From<u128> for I256 {
+    fn from(n: u128) -> Self {
+        // All u128 values fit in I256 (max u128 = 2^128 - 1 < I256::MAX = 2^255 - 1).
+        let bytes = crate::u256::U256::from(n).to_le_bytes();
+        Self::from_le_bytes(&bytes)
+    }
+}
+
+impl TryFrom<crate::u256::U256> for I256 {
+    type Error = I256CastError;
+    fn try_from(n: crate::u256::U256) -> Result<Self, Self::Error> {
+        let result = Self::from_le_bytes(&n.to_le_bytes());
+        if result < I256::from(0i8) {
+            Err(I256CastError::new(
+                result,
+                I256CastErrorKind::OutOfRangeForI256,
+            ))
+        } else {
+            Ok(result)
         }
     }
 }

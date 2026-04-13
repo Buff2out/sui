@@ -50,6 +50,9 @@ pub enum U256CastErrorKind {
 
     /// Value too large to fit in U128.
     TooLargeForU128,
+
+    /// Value is negative and cannot be represented as unsigned.
+    NegativeValue,
 }
 
 #[derive(Debug)]
@@ -68,15 +71,22 @@ impl std::error::Error for U256CastError {}
 
 impl fmt::Display for U256CastError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let type_str = match self.kind {
-            U256CastErrorKind::TooLargeForU8 => "u8",
-            U256CastErrorKind::TooLargeForU16 => "u16",
-            U256CastErrorKind::TooLargeForU32 => "u32",
-            U256CastErrorKind::TooLargeForU64 => "u64",
-            U256CastErrorKind::TooLargeForU128 => "u128",
-        };
-        let err_str = format!("Cast failed. {} too large for {}.", self.val, type_str);
-        write!(f, "{err_str}")
+        match self.kind {
+            U256CastErrorKind::NegativeValue => {
+                write!(f, "Cast failed. Negative value cannot be cast to unsigned.")
+            }
+            _ => {
+                let type_str = match self.kind {
+                    U256CastErrorKind::TooLargeForU8 => "u8",
+                    U256CastErrorKind::TooLargeForU16 => "u16",
+                    U256CastErrorKind::TooLargeForU32 => "u32",
+                    U256CastErrorKind::TooLargeForU64 => "u64",
+                    U256CastErrorKind::TooLargeForU128 => "u128",
+                    U256CastErrorKind::NegativeValue => unreachable!(),
+                };
+                write!(f, "Cast failed. {} too large for {}.", self.val, type_str)
+            }
+        }
     }
 }
 
@@ -556,6 +566,67 @@ impl TryFrom<U256> for u128 {
             Err(U256CastError::new(n, U256CastErrorKind::TooLargeForU128))
         } else {
             Ok(n.unchecked_as_u128())
+        }
+    }
+}
+
+// Cross-signedness: signed → U256 (negative values rejected)
+
+impl TryFrom<i8> for U256 {
+    type Error = U256CastError;
+    fn try_from(n: i8) -> Result<Self, Self::Error> {
+        u8::try_from(n)
+            .map(U256::from)
+            .map_err(|_| U256CastError::new(U256::zero(), U256CastErrorKind::NegativeValue))
+    }
+}
+
+impl TryFrom<i16> for U256 {
+    type Error = U256CastError;
+    fn try_from(n: i16) -> Result<Self, Self::Error> {
+        u16::try_from(n)
+            .map(U256::from)
+            .map_err(|_| U256CastError::new(U256::zero(), U256CastErrorKind::NegativeValue))
+    }
+}
+
+impl TryFrom<i32> for U256 {
+    type Error = U256CastError;
+    fn try_from(n: i32) -> Result<Self, Self::Error> {
+        u32::try_from(n)
+            .map(U256::from)
+            .map_err(|_| U256CastError::new(U256::zero(), U256CastErrorKind::NegativeValue))
+    }
+}
+
+impl TryFrom<i64> for U256 {
+    type Error = U256CastError;
+    fn try_from(n: i64) -> Result<Self, Self::Error> {
+        u64::try_from(n)
+            .map(U256::from)
+            .map_err(|_| U256CastError::new(U256::zero(), U256CastErrorKind::NegativeValue))
+    }
+}
+
+impl TryFrom<i128> for U256 {
+    type Error = U256CastError;
+    fn try_from(n: i128) -> Result<Self, Self::Error> {
+        u128::try_from(n)
+            .map(U256::from)
+            .map_err(|_| U256CastError::new(U256::zero(), U256CastErrorKind::NegativeValue))
+    }
+}
+
+impl TryFrom<crate::i256::I256> for U256 {
+    type Error = U256CastError;
+    fn try_from(n: crate::i256::I256) -> Result<Self, Self::Error> {
+        if n < crate::i256::I256::from(0i8) {
+            Err(U256CastError::new(
+                U256::zero(),
+                U256CastErrorKind::NegativeValue,
+            ))
+        } else {
+            Ok(U256::from_le_bytes(&n.to_le_bytes()))
         }
     }
 }
