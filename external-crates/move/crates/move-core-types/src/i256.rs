@@ -1229,4 +1229,137 @@ mod tests {
             I256::from(-1i8)
         );
     }
+
+    // =========================================================================
+    // Cross-signedness conversion tests: unsigned → I256
+    // =========================================================================
+
+    #[test]
+    fn from_u8_boundaries() {
+        assert_eq!(I256::from(0u8), I256::zero());
+        assert_eq!(I256::from(u8::MAX), I256::from(255i128));
+    }
+
+    #[test]
+    fn from_u16_boundaries() {
+        assert_eq!(I256::from(0u16), I256::zero());
+        assert_eq!(I256::from(u16::MAX), I256::from(65535i128));
+    }
+
+    #[test]
+    fn from_u32_boundaries() {
+        assert_eq!(I256::from(0u32), I256::zero());
+        assert_eq!(I256::from(u32::MAX), I256::from(u32::MAX as i128));
+    }
+
+    #[test]
+    fn from_u64_boundaries() {
+        assert_eq!(I256::from(0u64), I256::zero());
+        assert_eq!(I256::from(u64::MAX), I256::from(u64::MAX as i128));
+    }
+
+    #[test]
+    fn from_u128_boundaries() {
+        assert_eq!(I256::from(0u128), I256::zero());
+        // i128::MAX as u128 should work
+        assert_eq!(I256::from(i128::MAX as u128), I256::from(i128::MAX));
+        // u128::MAX (2^128 - 1) fits in I256 but exceeds i128
+        let max_u128 = I256::from(u128::MAX);
+        assert!(max_u128 > I256::from(i128::MAX));
+        assert!(max_u128 > I256::zero());
+    }
+
+    #[test]
+    fn try_from_u256_zero() {
+        let u = U256::zero();
+        assert_eq!(I256::try_from(u).unwrap(), I256::zero());
+    }
+
+    #[test]
+    fn try_from_u256_max_i256() {
+        // I256::MAX = 2^255 - 1, which as U256 should convert back
+        let max_bytes = I256::max_value().to_le_bytes();
+        let u = U256::from_le_bytes(&max_bytes);
+        assert_eq!(I256::try_from(u).unwrap(), I256::max_value());
+    }
+
+    #[test]
+    fn try_from_u256_too_large() {
+        // U256::MAX has the high bit set, so it exceeds I256::MAX
+        assert!(I256::try_from(U256::max_value()).is_err());
+        // I256::MAX + 1 as U256 should also fail (high bit set)
+        let one_past = {
+            let mut bytes = I256::max_value().to_le_bytes();
+            // I256::MAX in LE has byte 31 = 0x7F. Adding 1 to the value sets bit 255.
+            bytes[31] = 0x80;
+            U256::from_le_bytes(&bytes)
+        };
+        assert!(I256::try_from(one_past).is_err());
+    }
+
+    // =========================================================================
+    // Cross-signedness narrowing: signed → unsigned via TryFrom in u256.rs
+    // (tested here for convenience alongside the I256 tests)
+    // =========================================================================
+
+    #[test]
+    fn i8_to_u256_boundaries() {
+        assert_eq!(U256::try_from(0i8).unwrap(), U256::zero());
+        assert_eq!(U256::try_from(i8::MAX).unwrap(), U256::from(127u8));
+        assert!(U256::try_from(-1i8).is_err());
+        assert!(U256::try_from(i8::MIN).is_err());
+    }
+
+    #[test]
+    fn i16_to_u256_boundaries() {
+        assert_eq!(U256::try_from(0i16).unwrap(), U256::zero());
+        assert_eq!(U256::try_from(i16::MAX).unwrap(), U256::from(32767u16));
+        assert!(U256::try_from(-1i16).is_err());
+        assert!(U256::try_from(i16::MIN).is_err());
+    }
+
+    #[test]
+    fn i32_to_u256_boundaries() {
+        assert_eq!(U256::try_from(0i32).unwrap(), U256::zero());
+        assert_eq!(
+            U256::try_from(i32::MAX).unwrap(),
+            U256::from(i32::MAX as u32)
+        );
+        assert!(U256::try_from(-1i32).is_err());
+        assert!(U256::try_from(i32::MIN).is_err());
+    }
+
+    #[test]
+    fn i64_to_u256_boundaries() {
+        assert_eq!(U256::try_from(0i64).unwrap(), U256::zero());
+        assert_eq!(
+            U256::try_from(i64::MAX).unwrap(),
+            U256::from(i64::MAX as u64)
+        );
+        assert!(U256::try_from(-1i64).is_err());
+        assert!(U256::try_from(i64::MIN).is_err());
+    }
+
+    #[test]
+    fn i128_to_u256_boundaries() {
+        assert_eq!(U256::try_from(0i128).unwrap(), U256::zero());
+        assert_eq!(
+            U256::try_from(i128::MAX).unwrap(),
+            U256::from(i128::MAX as u128)
+        );
+        assert!(U256::try_from(-1i128).is_err());
+        assert!(U256::try_from(i128::MIN).is_err());
+    }
+
+    #[test]
+    fn i256_to_u256_boundaries() {
+        assert_eq!(U256::try_from(I256::zero()).unwrap(), U256::zero());
+        // I256::MAX should convert to U256 with same bit pattern
+        let max = I256::max_value();
+        let u = U256::try_from(max).unwrap();
+        assert_eq!(u.to_le_bytes(), max.to_le_bytes());
+        // Negative values fail
+        assert!(U256::try_from(I256::from(-1i8)).is_err());
+        assert!(U256::try_from(I256::min_value()).is_err());
+    }
 }
