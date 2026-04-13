@@ -345,7 +345,7 @@ impl VMDispatchTables {
             | TypeTag::I128
             | TypeTag::I256 => {
                 return Err(partial_vm_error!(
-                    EXTERNAL_RESOLUTION_REQUEST_ERROR,
+                    UNKNOWN_INVARIANT_VIOLATION_ERROR,
                     "signed integer types not yet supported in VM runtime"
                 )
                 .finish(Location::Undefined));

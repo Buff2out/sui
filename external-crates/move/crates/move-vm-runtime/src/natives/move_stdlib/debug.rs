@@ -524,13 +524,41 @@ mod testing {
                     write!(out, "u256").map_err(fmt_error_to_partial_vm_error)?;
                 }
             }
-            A::MoveValue::I8(_)
-            | A::MoveValue::I16(_)
-            | A::MoveValue::I32(_)
-            | A::MoveValue::I64(_)
-            | A::MoveValue::I128(_)
-            | A::MoveValue::I256(_) => {
-                write!(out, "<signed int>").map_err(fmt_error_to_partial_vm_error)?;
+            A::MoveValue::I8(v) => {
+                write!(out, "{}", v).map_err(fmt_error_to_partial_vm_error)?;
+                if include_int_types {
+                    write!(out, "i8").map_err(fmt_error_to_partial_vm_error)?;
+                }
+            }
+            A::MoveValue::I16(v) => {
+                write!(out, "{}", v).map_err(fmt_error_to_partial_vm_error)?;
+                if include_int_types {
+                    write!(out, "i16").map_err(fmt_error_to_partial_vm_error)?;
+                }
+            }
+            A::MoveValue::I32(v) => {
+                write!(out, "{}", v).map_err(fmt_error_to_partial_vm_error)?;
+                if include_int_types {
+                    write!(out, "i32").map_err(fmt_error_to_partial_vm_error)?;
+                }
+            }
+            A::MoveValue::I64(v) => {
+                write!(out, "{}", v).map_err(fmt_error_to_partial_vm_error)?;
+                if include_int_types {
+                    write!(out, "i64").map_err(fmt_error_to_partial_vm_error)?;
+                }
+            }
+            A::MoveValue::I128(v) => {
+                write!(out, "{}", v).map_err(fmt_error_to_partial_vm_error)?;
+                if include_int_types {
+                    write!(out, "i128").map_err(fmt_error_to_partial_vm_error)?;
+                }
+            }
+            A::MoveValue::I256(v) => {
+                write!(out, "{}", v).map_err(fmt_error_to_partial_vm_error)?;
+                if include_int_types {
+                    write!(out, "i256").map_err(fmt_error_to_partial_vm_error)?;
+                }
             }
             A::MoveValue::Bool(b) => {
                 // Note that when `include_int_types` is enabled, the boolean `true` and `false`
