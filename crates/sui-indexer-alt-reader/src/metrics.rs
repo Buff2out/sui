@@ -1,7 +1,11 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::Context;
+use std::task::Poll;
 
 use prometheus::Histogram;
 use prometheus::HistogramVec;
@@ -12,6 +16,8 @@ use prometheus::register_histogram_vec_with_registry;
 use prometheus::register_histogram_with_registry;
 use prometheus::register_int_counter_vec_with_registry;
 use prometheus::register_int_counter_with_registry;
+use tower::Layer;
+use tower::Service;
 
 /// Histogram buckets for the distribution of latency (time between sending a DB request and
 /// receiving a response).
@@ -50,6 +56,26 @@ pub(crate) struct LedgerGrpcReaderMetrics {
     pub requests_received: IntCounterVec,
     pub requests_succeeded: IntCounterVec,
     pub requests_failed: IntCounterVec,
+}
+
+#[derive(Clone)]
+pub struct GrpcMetrics {
+    latency: HistogramVec,
+    requests_received: IntCounterVec,
+    requests_succeeded: IntCounterVec,
+    requests_failed: IntCounterVec,
+}
+
+#[derive(Clone)]
+pub struct GrpcMetricsLayer {
+    metrics: Arc<GrpcMetrics>,
+}
+
+/// Middleware to record metrics defined in `GrpcMetrics`
+#[derive(Clone)]
+pub struct GrpcMetricsService<S> {
+    inner: S,
+    metrics: Arc<GrpcMetrics>,
 }
 
 impl DbReaderMetrics {
@@ -212,6 +238,110 @@ impl LedgerGrpcReaderMetrics {
                 registry,
             )
             .unwrap(),
+        })
+    }
+}
+
+impl GrpcMetrics {
+    pub fn new(prefix: &str, registry: &Registry) -> Self {
+        let name = |n| format!("{prefix}_{n}");
+
+        Self {
+            latency: register_histogram_vec_with_registry!(
+                name("latency"),
+                "Time taken for gRPC operations",
+                &["method"],
+                LATENCY_SEC_BUCKETS.to_vec(),
+                registry,
+            )
+            .unwrap(),
+
+            requests_received: register_int_counter_vec_with_registry!(
+                name("requests_received"),
+                "Number of gRPC requests sent",
+                &["method"],
+                registry,
+            )
+            .unwrap(),
+
+            requests_succeeded: register_int_counter_vec_with_registry!(
+                name("requests_succeeded"),
+                "Number of gRPC requests that completed successfully",
+                &["method"],
+                registry,
+            )
+            .unwrap(),
+
+            requests_failed: register_int_counter_vec_with_registry!(
+                name("requests_failed"),
+                "Number of gRPC requests that completed with an error",
+                &["method"],
+                registry,
+            )
+            .unwrap(),
+        }
+    }
+}
+
+impl GrpcMetricsLayer {
+    pub fn new(prefix: &str, registry: &Registry) -> Self {
+        Self {
+            metrics: Arc::new(GrpcMetrics::new(prefix, registry)),
+        }
+    }
+}
+
+impl<S> Layer<S> for GrpcMetricsLayer {
+    type Service = GrpcMetricsService<S>;
+
+    fn layer(&self, service: S) -> Self::Service {
+        MetricsService {
+            inner: service,
+            metrics: self.metrics.clone(),
+        }
+    }
+}
+
+impl<S, ReqBody, ResBody> Service<http::Request<ReqBody>> for GrpcMetricsService<S>
+where
+    S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>> + Send + 'static,
+    S::Future: Send + 'static,
+    S::Error: Send + 'static,
+    ReqBody: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: http::Request<ReqBody>) -> Self::Future {
+        let method = req.uri().path().to_string();
+
+        let metrics = self.metrics.clone();
+        metrics
+            .requests_received
+            .with_label_values(&[&method])
+            .inc();
+        let timer = metrics.latency.with_label_values(&[&method]).start_timer();
+
+        let fut = self.inner.call(req);
+        Box::pin(async move {
+            let result = fut.await;
+            // Only record duration for calls that completed (successfully or with error)
+            timer.observe_duration();
+
+            if result.is_ok() {
+                metrics
+                    .requests_succeeded
+                    .with_label_values(&[&method])
+                    .inc();
+            } else {
+                metrics.requests_failed.with_label_values(&[&method]).inc();
+            }
+            result
         })
     }
 }
