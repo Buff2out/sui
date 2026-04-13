@@ -54,6 +54,7 @@ feature_flags:
   enable_nitro_attestation_upgraded_parsing: true
   enable_nitro_attestation_all_nonzero_pcrs_parsing: true
   enable_nitro_attestation_always_include_required_pcrs_parsing: true
+  enable_gcp_attestation: true
   reject_mutable_random_on_entry_functions: true
   per_object_congestion_control_mode:
     ExecutionTimeEstimate:
@@ -199,7 +200,7 @@ binary_friend_decls: 100
 binary_variant_handles: 1024
 binary_variant_instantiation_handles: 1024
 max_move_object_size: 256000
-max_move_package_size: 102400
+max_move_package_size: 112640
 max_publish_or_upgrade_per_ptb: 5
 max_tx_gas: 50000000000000
 max_gas_price: 50000000000
@@ -423,6 +424,8 @@ nitro_attestation_parse_base_cost: 2650
 nitro_attestation_parse_cost_per_byte: 50
 nitro_attestation_verify_base_cost: 2481600
 nitro_attestation_verify_cost_per_cert: 2618450
+gcp_attestation_verify_base_cost: 1100000
+gcp_attestation_verify_cost_per_byte: 50
 bcs_per_byte_serialized_cost: 2
 bcs_legacy_min_output_size_cost: 1
 bcs_failure_cost: 52
