@@ -43,22 +43,6 @@ pub(crate) struct ConsistentReaderMetrics {
 }
 
 #[derive(Clone)]
-pub(crate) struct FullnodeClientMetrics {
-    pub latency: HistogramVec,
-    pub requests_received: IntCounterVec,
-    pub requests_succeeded: IntCounterVec,
-    pub requests_failed: IntCounterVec,
-}
-
-#[derive(Clone)]
-pub(crate) struct LedgerGrpcReaderMetrics {
-    pub latency: HistogramVec,
-    pub requests_received: IntCounterVec,
-    pub requests_succeeded: IntCounterVec,
-    pub requests_failed: IntCounterVec,
-}
-
-#[derive(Clone)]
 pub struct GrpcMetrics {
     latency: HistogramVec,
     requests_received: IntCounterVec,
@@ -158,90 +142,6 @@ impl ConsistentReaderMetrics {
     }
 }
 
-impl FullnodeClientMetrics {
-    pub(crate) fn new(prefix: Option<&str>, registry: &Registry) -> Arc<Self> {
-        let prefix = prefix.unwrap_or("fullnode_client");
-        let name = |n| format!("{prefix}_{n}");
-
-        Arc::new(Self {
-            latency: register_histogram_vec_with_registry!(
-                name("latency"),
-                "Time taken for full node gRPC operations",
-                &["method"],
-                LATENCY_SEC_BUCKETS.to_vec(),
-                registry,
-            )
-            .unwrap(),
-
-            requests_received: register_int_counter_vec_with_registry!(
-                name("requests_received"),
-                "Number of full node requests received",
-                &["method"],
-                registry,
-            )
-            .unwrap(),
-
-            requests_succeeded: register_int_counter_vec_with_registry!(
-                name("requests_succeeded"),
-                "Number of successful full node requests",
-                &["method"],
-                registry,
-            )
-            .unwrap(),
-
-            requests_failed: register_int_counter_vec_with_registry!(
-                name("requests_failed"),
-                "Number of failed full node requests",
-                &["method"],
-                registry,
-            )
-            .unwrap(),
-        })
-    }
-}
-
-impl LedgerGrpcReaderMetrics {
-    pub(crate) fn new(prefix: Option<&str>, registry: &Registry) -> Arc<Self> {
-        let prefix = prefix.unwrap_or("ledger_grpc");
-        let name = |n| format!("{prefix}_{n}");
-
-        Arc::new(Self {
-            latency: register_histogram_vec_with_registry!(
-                name("latency"),
-                "Time taken for ledger service gRPC operations",
-                &["method"],
-                LATENCY_SEC_BUCKETS.to_vec(),
-                registry,
-            )
-            .unwrap(),
-
-            requests_received: register_int_counter_vec_with_registry!(
-                name("requests_received"),
-                "Number of ledger service requests sent",
-                &["method"],
-                registry,
-            )
-            .unwrap(),
-
-            requests_succeeded: register_int_counter_vec_with_registry!(
-                name("requests_succeeded"),
-                "Number of successful ledger service requests",
-                &["method"],
-                registry,
-            )
-            .unwrap(),
-
-            requests_failed: register_int_counter_vec_with_registry!(
-                name("requests_failed"),
-                "Number of failed ledger service requests",
-                &["method"],
-                registry,
-            )
-            .unwrap(),
-        })
-    }
-}
-
 impl GrpcMetrics {
     pub fn new(prefix: &str, registry: &Registry) -> Self {
         let name = |n| format!("{prefix}_{n}");
@@ -295,7 +195,7 @@ impl<S> Layer<S> for GrpcMetricsLayer {
     type Service = GrpcMetricsService<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        MetricsService {
+        GrpcMetricsService {
             inner: service,
             metrics: self.metrics.clone(),
         }
@@ -330,8 +230,6 @@ where
         let fut = self.inner.call(req);
         Box::pin(async move {
             let result = fut.await;
-            // Only record duration for calls that completed (successfully or with error)
-            timer.observe_duration();
 
             if result.is_ok() {
                 metrics

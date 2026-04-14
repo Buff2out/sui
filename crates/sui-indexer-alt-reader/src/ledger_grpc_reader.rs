@@ -1,7 +1,6 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -19,8 +18,8 @@ use tonic::transport::ClientTlsConfig;
 use tonic::transport::Uri;
 use tower::Layer;
 
-use crate::metrics::MetricsLayer;
-use crate::metrics::MetricsService;
+use crate::metrics::GrpcMetricsLayer;
+use crate::metrics::GrpcMetricsService;
 
 const DEFAULT_MAX_DECODING_MESSAGE_SIZE: usize = 32 * 1024 * 1024;
 
@@ -52,7 +51,7 @@ pub struct CheckpointedTransaction {
 /// as fullnode, but is backed by Bigtable for serving historical data.
 #[derive(Clone)]
 pub struct LedgerGrpcReader {
-    client: LedgerServiceClient<MetricsService<Channel>>,
+    client: LedgerServiceClient<GrpcMetricsService<Channel>>,
     timeout: Option<Duration>,
 }
 
@@ -81,7 +80,8 @@ impl LedgerGrpcReader {
         }
 
         let channel = endpoint.connect_lazy();
-        let layered = MetricsLayer::new(prefix.unwrap_or("ledger_grpc"), registry).layer(channel);
+        let layered =
+            GrpcMetricsLayer::new(prefix.unwrap_or("ledger_grpc"), registry).layer(channel);
 
         let timeout = args.statement_timeout();
         let max_decoding_message_size = args
@@ -125,6 +125,7 @@ impl LedgerGrpcReader {
         request: grpc::GetCheckpointRequest,
     ) -> Result<grpc::GetCheckpointResponse, tonic::Status> {
         self.client
+            .clone()
             .get_checkpoint(self.request(request))
             .await
             .map(|r| r.into_inner())
@@ -135,6 +136,7 @@ impl LedgerGrpcReader {
         request: grpc::BatchGetTransactionsRequest,
     ) -> Result<grpc::BatchGetTransactionsResponse, tonic::Status> {
         self.client
+            .clone()
             .batch_get_transactions(self.request(request))
             .await
             .map(|r| r.into_inner())
@@ -145,6 +147,7 @@ impl LedgerGrpcReader {
         request: grpc::BatchGetObjectsRequest,
     ) -> Result<grpc::BatchGetObjectsResponse, tonic::Status> {
         self.client
+            .clone()
             .batch_get_objects(self.request(request))
             .await
             .map(|r| r.into_inner())
@@ -155,6 +158,7 @@ impl LedgerGrpcReader {
         request: grpc::GetTransactionRequest,
     ) -> Result<grpc::GetTransactionResponse, tonic::Status> {
         self.client
+            .clone()
             .get_transaction(self.request(request))
             .await
             .map(|r| r.into_inner())

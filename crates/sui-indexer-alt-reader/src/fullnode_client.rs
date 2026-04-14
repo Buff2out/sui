@@ -1,8 +1,6 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::Arc;
-
 use anyhow::Context;
 use prometheus::Registry;
 use prost_types::FieldMask;
@@ -13,10 +11,12 @@ use sui_types::transaction::Transaction;
 use sui_types::transaction::TransactionData;
 use tonic::transport::Channel;
 use tonic::transport::ClientTlsConfig;
+use tower::Layer;
 use tracing::instrument;
 use url::Url;
 
-use crate::metrics::FullnodeClientMetrics;
+use crate::metrics::GrpcMetricsLayer;
+use crate::metrics::GrpcMetricsService;
 
 #[derive(clap::Args, Debug, Clone, Default)]
 pub struct FullnodeArgs {
@@ -28,8 +28,9 @@ pub struct FullnodeArgs {
 /// A client for executing and simulating transactions via the full node gRPC service.
 #[derive(Clone)]
 pub struct FullnodeClient {
-    execution_client: Option<TransactionExecutionServiceClient<Channel>>,
-    metrics: Arc<FullnodeClientMetrics>,
+    // TODO (wlmyng) make execution_client non-optional. "Not configured" state should belong to the
+    // caller as Option<FullnodeClient>
+    execution_client: Option<TransactionExecutionServiceClient<GrpcMetricsService<Channel>>>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -61,17 +62,14 @@ impl FullnodeClient {
             }
 
             let channel = endpoint.connect_lazy();
-            Some(TransactionExecutionServiceClient::new(channel))
+            let layered =
+                GrpcMetricsLayer::new(prefix.unwrap_or("fullnode"), registry).layer(channel);
+            Some(TransactionExecutionServiceClient::new(layered))
         } else {
             None
         };
 
-        let metrics = FullnodeClientMetrics::new(prefix, registry);
-
-        Ok(Self {
-            execution_client,
-            metrics,
-        })
+        Ok(Self { execution_client })
     }
 
     /// Execute a transaction on the Sui network via gRPC.
@@ -106,12 +104,15 @@ impl FullnodeClient {
         .with_signatures(signatures)
         .with_read_mask(read_mask);
 
-        self.request(
-            "execute_transaction",
-            self.execution_client.clone(),
-            |mut client| async move { client.execute_transaction(request).await },
-        )
-        .await
+        let Some(mut client) = self.execution_client.clone() else {
+            return Err(Error::NotConfigured);
+        };
+
+        client
+            .execute_transaction(request)
+            .await
+            .map(|r| r.into_inner())
+            .map_err(Into::into)
     }
 
     /// Simulate a transaction on the Sui network via gRPC.
@@ -140,57 +141,15 @@ impl FullnodeClient {
             .with_checks(checks)
             .with_do_gas_selection(do_gas_selection);
 
-        self.request(
-            "simulate_transaction",
-            self.execution_client.clone(),
-            |mut client| async move { client.simulate_transaction(request).await },
-        )
-        .await
-    }
-
-    async fn request<C, F, Fut, R>(
-        &self,
-        method: &str,
-        client: Option<C>,
-        response: F,
-    ) -> Result<R, Error>
-    where
-        F: FnOnce(C) -> Fut,
-        Fut: std::future::Future<Output = Result<tonic::Response<R>, tonic::Status>>,
-    {
-        let Some(client) = client else {
+        let Some(mut client) = self.execution_client.clone() else {
             return Err(Error::NotConfigured);
         };
 
-        self.metrics
-            .requests_received
-            .with_label_values(&[method])
-            .inc();
-
-        let _timer = self
-            .metrics
-            .latency
-            .with_label_values(&[method])
-            .start_timer();
-
-        let response = response(client)
+        client
+            .simulate_transaction(request)
             .await
             .map(|r| r.into_inner())
-            .map_err(Into::into);
-
-        if response.is_ok() {
-            self.metrics
-                .requests_succeeded
-                .with_label_values(&[method])
-                .inc();
-        } else {
-            self.metrics
-                .requests_failed
-                .with_label_values(&[method])
-                .inc();
-        }
-
-        response
+            .map_err(Into::into)
     }
 }
 
