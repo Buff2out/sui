@@ -230,6 +230,7 @@ where
         let fut = self.inner.call(req);
         Box::pin(async move {
             let result = fut.await;
+            timer.observe_duration();
 
             if result.is_ok() {
                 metrics
